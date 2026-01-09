@@ -1,24 +1,18 @@
 import streamlit as st
+from StreamlitLogic.file_info import render_file_info
+from StreamlitLogic.ocr_processor import render_ocr
 
-st.title("📄 Информация о загруженном файле")
+# Заголовок всего приложения
+st.set_page_config(page_title="Мой OCR-анализатор", layout="wide")
+st.title("🚀 Многофункциональный анализ файлов")
 
-uploaded_file = st.file_uploader("Загрузите файл", accept_multiple_files=False)
+# Навигация (можно через sidebar, tabs или selectbox)
+option = st.sidebar.selectbox(
+    "Выберите функцию:",
+    ["Информация о файле", "OCR-распознавание"]
+)
 
-if uploaded_file is not None:
-    file_name = uploaded_file.name
-    file_size = uploaded_file.size
-    file_type = uploaded_file.type if uploaded_file.type else "Неизвестен"
-
-    st.subheader("Информация о файле:")
-    st.write(f"**Имя файла:** `{file_name}`")
-    st.write(f"**Размер:** {file_size} байт ({file_size / 1024:.2f} КБ)")
-    st.write(f"**MIME-тип:** `{file_type}`")
-
-    if file_type.startswith("text/") or file_name.endswith((".txt", ".csv", ".log")):
-        try:
-            content = uploaded_file.getvalue().decode("utf-8")[:500]
-            st.text_area("Первые 500 символов содержимого:", content, height=150)
-        except UnicodeDecodeError:
-            st.info("Файл не является текстовым (не удалось декодировать как UTF-8).")
-else:
-    st.info("Пожалуйста, загрузите файл.")
+if option == "Информация о файле":
+    render_file_info()
+elif option == "OCR-распознавание":
+    render_ocr()
