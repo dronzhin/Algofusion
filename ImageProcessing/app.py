@@ -1,46 +1,59 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 import io
 from PIL import Image
 from pdf2image import convert_from_bytes
 import base64
 
-app = FastAPI(title="Image to Binary Converter")
+app = FastAPI(title="Чёрно-белый конвертер (только 2 цвета)")
+
 
 @app.post("/convert")
-async def convert_image(file: UploadFile = File(...), output_format: str = "bytes"):
+async def convert_image(
+        file: UploadFile = File(...),
+        threshold: int = Query(128, ge=0, le=255, description="Порог бинаризации (0–255)")
+):
     """
-    Принимает файлы PDF, JPG, PNG.
-    Параметр output_format: 'bytes' (по умолчанию) или 'base64'.
-    Для PDF конвертирует первую страницу в изображение.
-    Возвращает бинарные данные изображения.
+    Принимает PDF, JPG, PNG.
+    Конвертирует все страницы в строго чёрно-белые изображения (режим '1', без dithering).
+    Возвращает список base64-изображений.
+
+    Параметры:
+      - file: загружаемый файл
+      - threshold: порог яркости (по умолчанию 128). Пиксели ярче — белые, темнее — чёрные.
     """
     if not file.content_type.startswith(("image/", "application/pdf")):
-        raise HTTPException(status_code=400, detail="Unsupported file type")
+        raise HTTPException(status_code=400, detail="Неподдерживаемый тип файла")
 
     contents = await file.read()
 
     try:
+        # Обработка PDF или изображения
         if file.content_type == "application/pdf":
-            # Конвертируем первую страницу PDF в изображение
-            images = convert_from_bytes(contents, first_page=1, last_page=1)
-            img = images[0]
+            images = convert_from_bytes(contents)
         else:
-            # Открываем как изображение
-            img = Image.open(io.BytesIO(contents)).convert("RGB")
+            img = Image.open(io.BytesIO(contents))
+            images = [img]
 
-        # Сохраняем в буфер
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        buffer.seek(0)
-        binary_data = buffer.getvalue()
+        binary_images = []
+        for img in images:
+            # Приведение к grayscale, если нужно
+            if img.mode != 'L':
+                img = img.convert('L')
+            # Бинаризация без dithering: только чёрный (0) и белый (255)
+            img_bw = img.point(lambda x: 255 if x > threshold else 0, mode='1')
+            binary_images.append(img_bw)
 
-        if output_format == "base64":
-            b64 = base64.b64encode(binary_data).decode('utf-8')
-            return {"binary_base64": b64}
-        else:
-            # Возвращаем чистые байты как тело ответа
-            return Response(content=binary_data, media_type="application/octet-stream")
+        # Сохранение в PNG-байты
+        png_buffers = []
+        for img in binary_images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            png_buffers.append(buf.getvalue())
+
+        # Кодирование в base64
+        b64_list = [base64.b64encode(data).decode('utf-8') for data in png_buffers]
+        return {"images_base64": b64_list}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")

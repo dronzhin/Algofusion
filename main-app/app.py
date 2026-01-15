@@ -1,18 +1,24 @@
 import streamlit as st
 from StreamlitLogic.file_info import render_file_info
-from StreamlitLogic.ocr_processor import render_ocr
+from StreamlitLogic.binary_image import render_binary_image
+from StreamlitLogic.parameters import render_parameters  # Импорт новой вкладки
 
 # Заголовок всего приложения
 st.set_page_config(page_title="Мой OCR-анализатор", layout="wide")
 st.title("🚀 Многофункциональный анализ файлов")
 
-# Навигация (можно через sidebar, tabs или selectbox)
-option = st.sidebar.selectbox(
-    "Выберите функцию:",
-    ["Информация о файле", "OCR-распознавание"]
-)
+# Создаём вкладки (теперь три вкладки)
+tab1, tab2, tab3 = st.tabs([
+    "Информация о файле",
+    "Бинарное изображение",
+    "Параметры"  # Новая вкладка для настройки порога
+])
 
-if option == "Информация о файле":
+with tab1:
     render_file_info()
-elif option == "OCR-распознавание":
-    render_ocr()
+
+with tab2:
+    render_binary_image()
+
+with tab3:
+    render_parameters()
