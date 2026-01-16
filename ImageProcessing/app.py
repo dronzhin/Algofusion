@@ -1,67 +1,52 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-import io
-from PIL import Image
-from pdf2image import convert_from_bytes
-import base64
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
+from endpoints.convert import convert_image_endpoint
+from endpoints.rotate import rotate_image_endpoint
 
-app = FastAPI(title="Чёрно-белый конвертер")
+app = FastAPI(title="Image Processing API", version="1.0.0")
 
+# Настройка CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/convert")
 async def convert_image(
-        file: UploadFile = File(...),
-        threshold: int = Form(128),  # Принимаем как Form поле
-        output_format: str = Form("base64")
+    file: UploadFile = File(...),
+    threshold: int = Form(128, ge=0, le=255, description="Порог бинаризации (0-255)")
 ):
     """
     Конвертирует изображения и PDF в бинарный формат с заданным порогом.
     """
-    # Проверка типа файла
-    if not file.content_type.startswith(("image/", "application/pdf")):
-        raise HTTPException(status_code=400, detail="Неподдерживаемый тип файла")
+    return await convert_image_endpoint(file, threshold)
 
-    contents = await file.read()
+@app.post("/rotate")
+async def rotate_image(
+    file: UploadFile = File(...),
+    min_line_length: int = Form(50, ge=10, le=500, description="Минимальная длина линии"),
+    max_line_gap: int = Form(20, ge=1, le=100, description="Максимальный разрыв в линии"),
+    use_morphology: bool = Form(False, description="Применять морфологические операции")
+):
+    """
+    Находит самую длинную горизонтальную линию, определяет угол и поворачивает изображение.
+    """
+    return await rotate_image_endpoint(file, min_line_length, max_line_gap, use_morphology)
 
-    try:
-        # Обработка в зависимости от типа файла
-        if file.content_type == "application/pdf":
-            images = convert_from_bytes(contents)
-        else:
-            img = Image.open(io.BytesIO(contents))
-            images = [img]
+@app.get("/")
+async def root():
+    return {
+        "message": "Image Processing API",
+        "endpoints": {
+            "/convert": "POST - Конвертация в бинарный формат",
+            "/rotate": "POST - Выравнивание по горизонтальной линии"
+        },
+        "documentation": "/docs"
+    }
 
-        # Конвертация в бинарный формат
-        binary_images = []
-        for img in images:
-            # Преобразование в grayscale если необходимо
-            if img.mode != 'L':
-                img = img.convert('L')
-
-            # Отладочная информация
-            print(f"Обработка изображения: mode={img.mode}, size={img.size}, threshold={threshold}")
-
-            # Бинаризация
-            if threshold < 0:
-                threshold = 0
-            elif threshold > 255:
-                threshold = 255
-
-            img_bw = img.point(lambda x: 255 if x > threshold else 0, mode='1')
-            binary_images.append(img_bw)
-
-        # Сохранение в PNG
-        png_buffers = []
-        for i, img in enumerate(binary_images):
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-            png_buffers.append(buf.getvalue())
-            print(f"Страница {i + 1}: сохранено {len(buf.getvalue())} байт")
-
-        # Кодирование в base64
-        b64_list = [base64.b64encode(data).decode('utf-8') for data in png_buffers]
-        return {"images_base64": b64_list}
-
-    except Exception as e:
-        print(f"Ошибка обработки: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
