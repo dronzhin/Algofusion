@@ -1,24 +1,25 @@
 import streamlit as st
-from StreamlitLogic.file_info import render_file_info
-from StreamlitLogic.binary_image import render_binary_image
-from StreamlitLogic.image_rotation import render_image_rotation  # Новый импорт
+from pages import get_page_renderer
 
-# Заголовок всего приложения
+# Настройка страницы
 st.set_page_config(page_title="Мой OCR-анализатор", layout="wide")
 st.title("🚀 Многофункциональный анализ файлов")
 
-# Создаём вкладки
-tab1, tab2, tab3 = st.tabs([
-    "Информация о файле",
-    "Бинарное изображение",
-    "Выравнивание изображения"  # Новая вкладка
-])
+# Определение вкладок
+TAB_CONFIG = {
+    "Информация о файле": "file_info",
+    "Выравнивание изображения": "image_rotation",
+    "Бинарное изображение": "binary_image",
+    # "OCR распознавание": "ocr_page",
+    # "Экспорт результатов": "export_page"
+}
 
-with tab1:
-    render_file_info()
+# Создание вкладок
+tabs = st.tabs(list(TAB_CONFIG.keys()))
 
-with tab2:
-    render_binary_image()
+# Динамический рендеринг вкладок
+for tab, (tab_name, page_key) in zip(tabs, TAB_CONFIG.items()):
+    with tab:
+        render_page = get_page_renderer(page_key)
+        render_page()
 
-with tab3:
-    render_image_rotation()

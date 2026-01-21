@@ -1,0 +1,319 @@
+import streamlit as st
+from services.api_client import APIClient
+from services.image_service import ImageService
+from components.file_preview import FilePreviewComponent
+from components.settings_panel import SettingsPanel
+from utils import handle_api_error, handle_file_error, handle_image_processing_error, convert_file_to_image, get_file_icon
+from state.session_manager import SessionManager
+import base64
+from io import BytesIO
+from PIL import Image
+
+
+def render_page():
+    """
+    Страница выравнивания изображений
+    """
+    st.subheader("📊 Выравнивание изображения по горизонтальной линии")
+    st.markdown("""
+    Этот инструмент найдет самую длинную горизонтальную линию на изображении,
+    определит ее угол наклона и автоматически выровняет изображение.
+
+    **Обработка выполняется на сервере** для максимальной производительности.
+
+    **Поддерживаются только:** PDF, JPG, PNG, BMP, GIF
+    """)
+
+    # Проверка наличия файла
+    shared_file = SessionManager.get_shared_file()
+    if not shared_file:
+        st.warning("⚠️ Сначала загрузите файл во вкладке 'Информация о файле'")
+        return
+
+    # Проверка поддержки формата
+    if not _is_supported_for_rotation(shared_file):
+        _show_unsupported_format_error(shared_file)
+        return
+
+    # Отображение информации о файле
+    _show_file_info(shared_file)
+
+    # Подготовка изображения для обработки
+    image_bytes = _prepare_image_for_rotation(shared_file)
+    if not image_bytes:
+        return
+
+    # Отображение исходного изображения
+    _show_original_image(image_bytes, shared_file["name"])
+
+    # Настройки обработки
+    rotation_params = SettingsPanel.render_rotation_settings()
+
+    # Кнопка обработки
+    if st.button("🔄 Выровнять изображение на сервере", type="primary"):
+        _process_rotation(shared_file, image_bytes, rotation_params)
+
+
+def _is_supported_for_rotation(shared_file: dict) -> bool:
+    """
+    Проверить, поддерживается ли файл для выравнивания
+    """
+    supported_types = [
+        "application/pdf",
+        "image/jpeg", "image/jpg", "image/png",
+        "image/bmp", "image/gif"
+    ]
+    supported_exts = [".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif"]
+
+    return (shared_file["type"] in supported_types or
+            shared_file["ext"].lower() in supported_exts)
+
+
+def _show_unsupported_format_error(shared_file: dict):
+    """
+    Показать ошибку для неподдерживаемого формата
+    """
+    st.error(f"❌ Формат файла '{shared_file['ext']}' не поддерживается для выравнивания")
+    st.info("Поддерживаются только: PDF, JPG, JPEG, PNG, BMP, GIF")
+    st.markdown(f"""
+    **Текущий файл:** {shared_file['name']}
+    **Тип:** {shared_file['type']}
+    **Расширение:** {shared_file['ext']}
+    """)
+
+
+def _show_file_info(shared_file: dict):
+    """
+    Отображение информации о файле
+    """
+    icon = get_file_icon(shared_file["type"], shared_file["ext"])
+    st.info(f"{icon} Работаем с файлом: **{shared_file['name']}**")
+
+    # Выбор страницы для PDF
+    if shared_file["type"] == "application/pdf" or shared_file["ext"].lower() == ".pdf":
+        _show_pdf_page_selector(shared_file)
+
+
+def _show_pdf_page_selector(shared_file: dict):
+    """
+    Показать селектор страницы для PDF
+    """
+    import fitz
+
+    try:
+        pdf_doc = fitz.open(stream=BytesIO(shared_file["bytes"]), filetype="pdf")
+        page_count = pdf_doc.page_count
+        pdf_doc.close()
+
+        if page_count > 1:
+            page_num = st.number_input(
+                "Выберите страницу для выравнивания:",
+                min_value=1,
+                max_value=page_count,
+                value=1,
+                step=1,
+                key="pdf_page_selector_rotation"
+            )
+            st.session_state["rotation_page_num"] = page_num - 1
+        else:
+            st.info("📄 PDF содержит одну страницу")
+            st.session_state["rotation_page_num"] = 0
+
+    except Exception as e:
+        handle_file_error(e, "PDF документ")
+
+
+def _prepare_image_for_rotation(shared_file: dict) -> bytes:
+    """
+    Подготовка изображения для выравнивания
+    """
+    with st.spinner("🔄 Подготовка изображения для обработки..."):
+        try:
+            page_num = st.session_state.get("rotation_page_num", 0)
+
+            image_bytes = convert_file_to_image(
+                file_bytes=shared_file["bytes"],
+                file_type=shared_file["type"],
+                file_ext=shared_file["ext"],
+                page_num=page_num
+            )
+
+            if not image_bytes:
+                st.error("❌ Не удалось подготовить изображение для обработки")
+                return None
+
+            # Проверка размера изображения
+            if len(image_bytes) > 10 * 1024 * 1024:  # 10MB
+                st.warning("⚠️ Изображение слишком большое для обработки. Попробуйте уменьшить размер.")
+
+            return image_bytes
+
+        except Exception as e:
+            handle_image_processing_error(e, "подготовка изображения")
+            return None
+
+
+def _show_original_image(image_bytes: bytes, file_name: str):
+    """
+    Отображение исходного изображения
+    """
+    st.markdown("### 📷 Исходное изображение для выравнивания")
+
+    try:
+        # Показать исходное изображение
+        FilePreviewComponent.render(
+            file_bytes=image_bytes,
+            file_type="image/png",
+            file_name=file_name,
+            file_ext=".png",
+            title="Исходное изображение",
+            show_metadata=False
+        )
+
+    except Exception as e:
+        handle_image_processing_error(e, "отображение исходного изображения")
+
+
+def _process_rotation(shared_file: dict, image_bytes: bytes, params: dict):
+    """
+    Обработка выравнивания изображения
+    """
+    api_client = APIClient()
+
+    with st.spinner("🔍 Поиск горизонтальной линии и выравнивание изображения на сервере..."):
+        try:
+            # Подготовка файла для отправки
+            files = {"file": (f"temp_image.png", image_bytes, "image/png")}
+
+            # Отправка запроса
+            result = api_client.rotate_image(
+                image_data=image_bytes,
+                filename=f"temp_image.png",
+                params=params
+            )
+
+            if not result.get("success", False):
+                error_msg = result.get("error", "Неизвестная ошибка сервера")
+                handle_api_error(Exception(error_msg), "выравнивание изображения")
+                return
+
+            # Обработка результата
+            _display_rotation_result(result, image_bytes, shared_file["name"], params)
+
+        except Exception as e:
+            handle_api_error(e, "выравнивание изображения")
+
+
+def _display_rotation_result(result: dict, original_image_bytes: bytes,
+                             original_filename: str, params: dict):
+    """
+    Отображение результата выравнивания
+    """
+    rotated_b64 = result.get("rotated_image_base64")
+    rotation_angle = result.get("rotation_angle", 0.0)
+    line_info = result.get("line_info")
+
+    if not rotated_b64:
+        st.error("❌ Сервер не вернул обработанное изображение")
+        return
+
+    # Декодирование изображения
+    rotated_bytes = base64.b64decode(rotated_b64)
+
+    # Отображение результатов
+    st.markdown(f"### 🎯 Результат выравнивания (угол: {rotation_angle:.2f}°)")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Исходное изображение**")
+        try:
+            original_img = Image.open(BytesIO(original_image_bytes))
+            st.image(original_img, use_column_width=True)
+        except Exception as e:
+            st.error(f"Ошибка отображения исходного изображения: {e}")
+
+    with col2:
+        st.markdown("**Выровненное изображение**")
+        try:
+            rotated_img = Image.open(BytesIO(rotated_bytes))
+            st.image(rotated_img, use_column_width=True)
+        except Exception as e:
+            st.error(f"Ошибка отображения выровненного изображения: {e}")
+
+    # Информация о найденной линии
+    if line_info:
+        st.success(f"✅ Найдена горизонтальная линия длиной {line_info['length']:.1f} пикселей")
+        _show_line_details(line_info, rotation_angle)
+
+        # Визуализация линии
+        if st.checkbox("Показать найденную линию на исходном изображении", key="show_line_checkbox"):
+            _visualize_detected_line(original_image_bytes, line_info)
+    else:
+        st.info("ℹ️ Горизонтальные линии не найдены, изображение осталось без изменений")
+
+    # Кнопка скачивания
+    _show_download_button(rotated_bytes, original_filename, rotation_angle)
+
+
+def _show_line_details(line_info: dict, rotation_angle: float):
+    """
+    Отображение деталей о найденной линии
+    """
+    with st.expander("📊 Детали детекции линии", expanded=True):
+        st.markdown(f"""
+        **Параметры детекции:**
+        - Угол исходной линии: {line_info['detected_angle']:.2f}°
+        - Угол поворота для выравнивания: {rotation_angle:.2f}°
+        - Длина линии: {line_info['length']:.1f} пикселей
+        - Координаты линии: 
+          - Начало: ({line_info['start'][0]}, {line_info['start'][1]})
+          - Конец: ({line_info['end'][0]}, {line_info['end'][1]})
+        """)
+
+
+def _visualize_detected_line(image_bytes: bytes, line_info: dict):
+    """
+    Визуализация найденной линии на исходном изображении
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        # Загрузка изображения
+        img = Image.open(BytesIO(image_bytes))
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        img_array = np.array(img)
+
+        # Рисование линии
+        start_point = (int(line_info['start'][0]), int(line_info['start'][1]))
+        end_point = (int(line_info['end'][0]), int(line_info['end'][1]))
+
+        cv2.line(img_array, start_point, end_point, (0, 0, 255), 3)  # Красная линия
+
+        # Отображение
+        st.image(img_array, caption="Исходное изображение с найденной линией", use_column_width=True)
+
+    except Exception as e:
+        st.warning(f"Не удалось отобразить линию: {e}")
+
+
+def _show_download_button(rotated_bytes: bytes, original_filename: str, rotation_angle: float):
+    """
+    Кнопка для скачивания результата
+    """
+    st.markdown("---")
+
+    # Генерация имени файла
+    from pathlib import Path
+    file_stem = Path(original_filename).stem
+    output_filename = f"aligned_{file_stem}_{rotation_angle:.1f}deg.png"
+
+    st.download_button(
+        label="📥 Скачать выровненное изображение",
+        data=rotated_bytes,
+        file_name=output_filename,
+        mime="image/png",
+        key="download_rotated_result"
+    )

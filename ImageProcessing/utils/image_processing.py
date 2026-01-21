@@ -3,7 +3,9 @@ import numpy as np
 from PIL import Image
 import io
 import base64
+import logging
 
+logger = logging.getLogger(__name__)
 
 def binary_convert(image_bytes: bytes, threshold: int) -> bytes:
     """
@@ -36,7 +38,9 @@ def binary_convert(image_bytes: bytes, threshold: int) -> bytes:
         return output_buffer.getvalue()
 
     except Exception as e:
-        raise ValueError(f"Ошибка бинаризации изображения: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка бинаризации изображения: {safe_error}")
+        raise ValueError(f"Ошибка бинаризации изображения: {safe_error}")
 
 
 def find_longest_horizontal_line(image_bytes: bytes, min_line_length: int = 50, max_line_gap: int = 20) -> dict:
@@ -120,7 +124,9 @@ def find_longest_horizontal_line(image_bytes: bytes, min_line_length: int = 50, 
         }
 
     except Exception as e:
-        raise ValueError(f"Ошибка детекции линий: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка детекции линий: {safe_error}")
+        raise ValueError(f"Ошибка детекции линий: {safe_error}")
 
 
 def rotate_image(image_bytes: bytes, angle: float) -> bytes:
@@ -156,7 +162,9 @@ def rotate_image(image_bytes: bytes, angle: float) -> bytes:
         return buffer.tobytes()
 
     except Exception as e:
-        raise ValueError(f"Ошибка поворота изображения: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка поворота изображения: {safe_error}")
+        raise ValueError(f"Ошибка поворота изображения: {safe_error}")
 
 
 def apply_morphology(image_bytes: bytes) -> bytes:
@@ -192,4 +200,6 @@ def apply_morphology(image_bytes: bytes) -> bytes:
         return buffer.tobytes()
 
     except Exception as e:
-        raise ValueError(f"Ошибка морфологической обработки: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка морфологической обработки: {safe_error}")
+        raise ValueError(f"Ошибка морфологической обработки: {safe_error}")

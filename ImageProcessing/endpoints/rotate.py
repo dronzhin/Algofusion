@@ -5,6 +5,10 @@ import cv2
 import numpy as np
 import io
 from PIL import Image
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
 
 
 async def rotate_image_endpoint(
@@ -34,13 +38,13 @@ async def rotate_image_endpoint(
             if img is None:
                 raise ValueError("Не удалось загрузить изображение. Проверьте формат файла.")
 
-        print(f"\n{'=' * 50}")
-        print(f"DEBUG: Начало обработки файла: {file.filename}")
-        print(f"DEBUG: Размер изображения: {img.shape}")
-        print(f"DEBUG: Тип изображения: {img.dtype}")
-        print(
+        logger.debug("=" * 50)
+        logger.debug(f"DEBUG: Начало обработки файла: {file.filename}")
+        logger.debug(f"DEBUG: Размер изображения: {img.shape}")
+        logger.debug(f"DEBUG: Тип изображения: {img.dtype}")
+        logger.debug(
             f"DEBUG: Настройки: min_line_length={min_line_length}, max_line_gap={max_line_gap}, use_morphology={use_morphology}")
-        print(f"{'=' * 50}\n")
+        logger.debug("=" * 50)
 
         # ИНИЦИАЛИЗИРУЕМ ПЕРЕМЕННЫЕ ЗАРАНЕЕ для избежания ошибок
         horizontal_lines = []
@@ -53,7 +57,7 @@ async def rotate_image_endpoint(
 
         # Применяем морфологию если нужно
         if use_morphology:
-            print("DEBUG: Применение морфологических операций")
+            logger.debug("DEBUG: Применение морфологических операций")
             if len(img.shape) == 3:  # Если цветное
                 gray_for_morph = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             else:
@@ -71,18 +75,18 @@ async def rotate_image_endpoint(
         # Конвертируем в оттенки серого если цветное
         if len(img.shape) == 3:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            print("DEBUG: Конвертировано в grayscale")
+            logger.debug("DEBUG: Конвертировано в grayscale")
         else:
             gray = img.copy()
 
         # Применяем размытие
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        print(f"DEBUG: Применено размытие")
+        logger.debug(f"DEBUG: Применено размытие")
 
         # Детектируем границы
         edges = cv2.Canny(blurred, 50, 150, apertureSize=3)
         edge_count = np.sum(edges > 0)
-        print(f"DEBUG: Детектировано границ: {edge_count} пикселей")
+        logger.debug(f"DEBUG: Детектировано границ: {edge_count} пикселей")
 
         # Находим линии с помощью преобразования Хафа
         lines = cv2.HoughLinesP(
@@ -95,13 +99,13 @@ async def rotate_image_endpoint(
         )
 
         line_count = len(lines) if lines is not None else 0
-        print(f"DEBUG: Найдено линий: {line_count}")
+        logger.debug(f"DEBUG: Найдено линий: {line_count}")
 
         if lines is not None and line_count > 0:
             for i, line in enumerate(lines):
                 x1, y1, x2, y2 = line[0]
                 # ИСПРАВЛЕНО: правильное вычисление длины линии
-                length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                length = np.sqrt((x2 - x1) ** 2 +  (y2 - y1) **2)
 
                 # Правильное вычисление угла
                 dy = -(y2 - y1)  # Инвертируем ось Y
@@ -125,7 +129,7 @@ async def rotate_image_endpoint(
                     'dy': dy
                 })
 
-                print(
+                logger.debug(
                     f"DEBUG: Линия {i}: coords=({x1},{y1})-({x2},{y2}), length={length:.1f}, corrected_angle={angle:.2f}°")
 
                 # Считаем линию горизонтальной
@@ -141,11 +145,11 @@ async def rotate_image_endpoint(
                         'length': float(length),
                         'angle': float(angle)
                     })
-                    print(f"  ✓ Линия {i} считается горизонтальной (angle={angle:.2f}°)")
+                    logger.debug(f"  ✓ Линия {i} считается горизонтальной (angle={angle:.2f}°)")
                 else:
-                    print(f"  ✗ Линия {i} НЕ горизонтальная (angle={angle:.2f}°)")
+                    logger.debug(f"  ✗ Линия {i} НЕ горизонтальная (angle={angle:.2f}°)")
 
-            print(f"DEBUG: Найдено горизонтальных линий: {len(horizontal_lines)}")
+            logger.debug(f"DEBUG: Найдено горизонтальных линий: {len(horizontal_lines)}")
 
             if horizontal_lines:
                 longest_line = max(horizontal_lines, key=lambda x: x['length'])
@@ -163,22 +167,22 @@ async def rotate_image_endpoint(
                     'rotation_angle': rotation_angle
                 }
 
-                print(f"\n{'=' * 50}")
-                print(f"DEBUG: ВЫБРАНА ЛИНИЯ ДЛЯ ПОВОРОТА")
-                print(f"Координаты: ({x1}, {y1}) - ({x2}, {y2})")
-                print(f"Длина: {longest_line['length']:.1f} пикселей")
-                print(f"Угол линии: {line_angle:.2f}°")
-                print(f"Угол поворота: {rotation_angle:.2f}°")
-                print(f"{'=' * 50}\n")
+                logger.debug("=" * 50)
+                logger.debug("DEBUG: ВЫБРАНА ЛИНИЯ ДЛЯ ПОВОРОТА")
+                logger.debug(f"Координаты: ({x1}, {y1}) - ({x2}, {y2})")
+                logger.debug(f"Длина: {longest_line['length']:.1f} пикселей")
+                logger.debug(f"Угол линии: {line_angle:.2f}°")
+                logger.debug(f"Угол поворота: {rotation_angle:.2f}°")
+                logger.debug("=" * 50)
             else:
-                print("DEBUG: НЕТ горизонтальных линий, поворот не требуется")
+                logger.debug("DEBUG: НЕТ горизонтальных линий, поворот не требуется")
                 # Используем самую длинную линию как запасной вариант
                 if lines is not None and len(lines) > 0:
                     all_lines = []
                     for line in lines:
                         x1, y1, x2, y2 = line[0]
                         # ИСПРАВЛЕНО: правильное вычисление длины (второе место)
-                        length = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                        length = np.sqrt((x2 - x1) ** 2 + (y2 - y1)**2)
                         all_lines.append({
                             'coords': (int(x1), int(y1), int(x2), int(y2)),
                             'length': float(length)
@@ -206,12 +210,12 @@ async def rotate_image_endpoint(
                         'rotation_angle': rotation_angle,
                         'warning': 'Использована НЕ горизонтальная линия'
                     }
-                    print(
+                    logger.debug(
                         f"DEBUG: Использована самая длинная линия для поворота: angle={angle:.2f}°, rotation_angle={rotation_angle:.2f}°")
         else:
-            print("DEBUG: Не найдено линий для анализа")
+            logger.debug("DEBUG: Не найдено линий для анализа")
 
-        print(f"DEBUG: Применяем поворот на угол: {rotation_angle:.2f}°")
+        logger.debug(f"DEBUG: Применяем поворот на угол: {rotation_angle:.2f}°")
 
         # Поворачиваем оригинальное изображение
         height, width = original_img.shape[:2]
@@ -223,14 +227,14 @@ async def rotate_image_endpoint(
                                  borderMode=cv2.BORDER_CONSTANT,
                                  borderValue=(255, 255, 255))
 
-        print(f"DEBUG: Поворот применен успешно")
+        logger.debug("DEBUG: Поворот применен успешно")
 
         # Конвертируем в PNG
         is_success, buffer = cv2.imencode(".png", rotated)
         if not is_success or buffer.size == 0:
             raise ValueError("Ошибка конвертации изображения в PNG")
 
-        print(f"DEBUG: Размер буфера PNG: {buffer.size} байт")
+        logger.debug(f"DEBUG: Размер буфера PNG: {buffer.size} байт")
 
         # Кодируем в base64
         rotated_b64 = base64.b64encode(buffer).decode('utf-8')
@@ -251,18 +255,18 @@ async def rotate_image_endpoint(
         }
 
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"\n{'!' * 60}")
-        print(f"КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
-        print(f"Трейсбек:\n{error_details}")
-        print(f"{'!' * 60}\n")
+        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
+        logger.error(f"Трейсбек:\n{traceback.format_exc()}")
+
+        # Очищаем ошибку от непечатаемых символов
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        safe_details = traceback.format_exc().encode('utf-8', 'ignore').decode('utf-8')[:500]
 
         return {
             "rotated_image_base64": None,
             "rotation_angle": 0.0,
             "line_info": None,
             "success": False,
-            "error": str(e),
-            "error_details": error_details[:500]
+            "error": safe_error,
+            "error_details": safe_details
         }

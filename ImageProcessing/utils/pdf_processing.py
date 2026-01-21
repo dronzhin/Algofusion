@@ -1,8 +1,9 @@
 from pdf2image import convert_from_bytes
 import io
-from PIL import Image
 import base64
+import logging
 
+logger = logging.getLogger(__name__)
 
 def convert_pdf_to_images(pdf_bytes: bytes) -> list:
     """
@@ -17,7 +18,9 @@ def convert_pdf_to_images(pdf_bytes: bytes) -> list:
     try:
         return convert_from_bytes(pdf_bytes)
     except Exception as e:
-        raise ValueError(f"Ошибка конвертации PDF: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка конвертации PDF: {safe_error}")
+        raise ValueError(f"Ошибка конвертации PDF: {safe_error}")
 
 
 def images_to_base64(images: list) -> list:
@@ -40,4 +43,6 @@ def images_to_base64(images: list) -> list:
             base64_list.append(base64_str)
         return base64_list
     except Exception as e:
-        raise ValueError(f"Ошибка конвертации изображений в base64: {str(e)}")
+        safe_error = str(e).encode('utf-8', 'ignore').decode('utf-8')
+        logger.error(f"Ошибка конвертации изображений в base64: {safe_error}")
+        raise ValueError(f"Ошибка конвертации изображений в base64: {safe_error}")
