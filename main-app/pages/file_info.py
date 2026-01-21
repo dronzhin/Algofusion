@@ -1,120 +1,58 @@
+# pages/file_info.py
 import streamlit as st
 from services.file_service import FileService
-from components.file_preview import FilePreviewComponent
-from state.session_manager import SessionManager
-from utils import get_file_metadata, get_file_icon, handle_file_error, handle_image_processing_error
-from typing import Any, Dict
+from components import FilePreviewComponent
+from state.session_manager import SessionManager  # Используем наш менеджер
+from utils import get_file_metadata, get_file_icon
+from pathlib import Path
 
 
 def render_page():
     """
-    Страница информации о файле
+    Страница информации о файле с использованием SessionManager
     """
-    st.subheader(f"{get_file_icon('generic', '.txt')} Анализ файла")
+    st.subheader("📄 Анализ файла")
 
-    # Загрузка файла
-    uploaded_file = st.file_uploader("Загрузите файл", type=["pdf", "jpg", "jpeg", "png", "bmp", "gif", "docx"],
-                                     key="main_file_uploader")
-
-    # Обработка загрузки файла
-    if uploaded_file is not None:
-        _process_uploaded_file(uploaded_file)
+    # Очищаем результаты при загрузке нового файла
+    if "last_uploaded_file" in st.session_state:
+        current_file = st.session_state["last_uploaded_file"]
     else:
-        SessionManager.clear_shared_file()
-        st.info("👆 Пожалуйста, загрузите файл для анализа")
+        current_file = None
 
+    uploaded = st.file_uploader("Загрузите файл", key="main_file_uploader")
 
-def _process_uploaded_file(uploaded_file):
-    """
-    Обработка загруженного файла
-    """
-    try:
-        # Обработка файла через сервис
-        file_info = FileService.process_uploaded_file(uploaded_file)
+    # Очищаем состояние при новой загрузке
+    if uploaded is not None and (current_file != uploaded.name):
+        SessionManager.clear_all_results()
+        st.session_state["last_uploaded_file"] = uploaded.name
 
-        if file_info is None:
-            st.warning("⚠️ Файл не прошел валидацию. Пожалуйста, загрузите другой файл.")
-            return
+    if uploaded is None:
+        # Очищаем shared_file если файл удален
+        if current_file is not None:
+            SessionManager.clear_shared_file()
+            st.session_state["last_uploaded_file"] = None
+        return
 
-        # Получение метаданных
-        metadata = get_file_metadata(uploaded_file)
+    file_name = uploaded.name
+    file_size = uploaded.size
+    mime_type = uploaded.type
+    file_ext = Path(file_name).suffix.lower()
 
-        # Сохранение в сессию
-        SessionManager.set_shared_file(file_info)
+    # Сохраняем файл в состояние через SessionManager
+    file_info = {
+        "name": file_name,
+        "bytes": uploaded.getvalue(),
+        "type": mime_type,
+        "ext": file_ext
+    }
+    SessionManager.set_shared_file(file_info)
 
-        # Отображение информации о файле
-        _show_file_info(metadata, file_info)
-
-        # Отображение предпросмотра
-        _show_file_preview(file_info, metadata)
-
-    except Exception as e:
-        handle_file_error(e, uploaded_file.name if uploaded_file else "неизвестный файл")
-
-
-def _show_file_info(metadata: Dict[str, Any], file_info: Dict[str, Any]):
-    """
-    Отображение информации о файле
-    """
-    with st.expander("📋 Информация о файле", expanded=True):
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            icon = get_file_icon(file_info["type"], file_info["ext"])
-            st.markdown(f"### {icon} {metadata['name']}")
-            st.metric("Размер", f"{metadata['size_mb']} MB")
-            st.metric("Тип", file_info["type"])
-
-        with col2:
-            st.metric("Расширение", metadata["ext"].upper())
-            if metadata["is_image"]:
-                st.success("✅ Это изображение")
-            elif metadata["is_pdf"]:
-                st.success("✅ Это PDF документ")
-            elif metadata["is_docx"]:
-                st.success("✅ Это Word документ")
-            else:
-                st.warning("⚠️ Формат может не поддерживаться для некоторых операций")
-
-        # Дополнительная информация
-        st.markdown("---")
-        st.markdown("**Доступные операции:**")
-
-        supported_operations = []
-        if metadata["is_image"] or metadata["is_pdf"]:
-            supported_operations.extend([
-                "Выравнивание изображения",
-                "Конвертация в бинарный формат"
-            ])
-
-        if metadata["is_pdf"] or metadata["is_docx"]:
-            supported_operations.append("OCR распознавание (в разработке)")
-
-        if supported_operations:
-            for operation in supported_operations:
-                st.markdown(f"- ✅ {operation}")
-        else:
-            st.markdown("- ❌ Нет доступных операций для этого типа файла")
-
-
-def _show_file_preview(file_info: Dict[str, Any], metadata: Dict[str, Any]):
-    """
-    Отображение предпросмотра файла
-    """
-    st.markdown("---")
-    st.subheader("🔍 Предпросмотр файла")
-
-    try:
-        # Универсальное отображение предпросмотра
-        FilePreviewComponent.render(
-            file_bytes=file_info["bytes"],
-            file_type=file_info["type"],
-            file_name=file_info["name"],
-            file_ext=file_info["ext"],
-            title=f"📥 Исходный файл: {file_info['name']}",
-            show_metadata=True
-        )
-
-    except Exception as e:
-        handle_image_processing_error(e, "предпросмотр файла")
-        st.info("Предпросмотр недоступен для этого типа файла.")
+    # Используем универсальную функцию для отображения
+    FilePreviewComponent.render(
+        file_bytes=uploaded.getvalue(),
+        file_type=mime_type,
+        file_name=file_name,
+        file_ext=file_ext,
+        title="📥 Исходный файл",
+        show_metadata=True
+    )
