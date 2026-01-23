@@ -7,7 +7,7 @@ from utils import setup_app_logger
 # Настройка логгера до любых других импортов
 APP_LOGGER = setup_app_logger(
     name="app",
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=os.getenv("LOG_LEVEL", "DEBUG"),
     log_file=os.getenv("LOG_FILE", "./logs/app.log")
 )
 
