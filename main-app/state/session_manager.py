@@ -122,7 +122,6 @@ class SessionManager:
         if st.session_state.get(cls.SESSION_INITIALIZED):
             return  # Уже инициализировано — выходим
 
-        logger.info("Инициализация сессии...")
         defaults = {
             cls.SHARED_FILE: None,
             cls.BINARY_RESULTS: None,
@@ -138,7 +137,6 @@ class SessionManager:
 
         # Устанавливаем флаг
         st.session_state[cls.SESSION_INITIALIZED] = True
-        logger.info("Сессия инициализирована успешно")
 
     @classmethod
     def clear_all_results(cls):
