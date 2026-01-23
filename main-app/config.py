@@ -27,12 +27,28 @@ class Config:
     SUPPORTED_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_PDF_EXTENSIONS | SUPPORTED_DOCX_EXTENSIONS
     SUPPORTED_TYPES = SUPPORTED_IMAGE_TYPES | SUPPORTED_PDF_TYPES | SUPPORTED_DOCX_TYPES
 
-    # Параметры обработки изображений
+    # === Параметры обработки изображений ===
     DEFAULT_DPI = 150
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
+    # Бинаризация
+    DEFAULT_BINARY_THRESHOLD = 128
+
+    # Детекция линий (выравнивание)
+    DEFAULT_MIN_LINE_LENGTH = 50
+    DEFAULT_MAX_LINE_GAP = 40
+    DEFAULT_USE_MORPHOLOGY = True
+
     # Настройки сессии
     SESSION_TIMEOUT_MINUTES = 30
+
+    @classmethod
+    def get_rotation_default_params(cls) -> Dict[str, Any]:
+        return {
+            "min_line_length": cls.DEFAULT_MIN_LINE_LENGTH,
+            "max_line_gap": cls.DEFAULT_MAX_LINE_GAP,
+            "use_morphology": cls.DEFAULT_USE_MORPHOLOGY
+        }
 
     @classmethod
     def get_api_config(cls) -> Dict[str, Any]:

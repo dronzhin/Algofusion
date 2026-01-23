@@ -1,7 +1,12 @@
+# components/settings_panel.py
 import streamlit as st
+import logging
 from typing import Dict, Any
-from utils.validation import validate_line_detection_params
+from config import Config
+from utils import validate_line_detection_params
 
+# Создаём логгер для этого модуля
+logger = logging.getLogger(f"app.{__name__}")
 
 class SettingsPanel:
     """
@@ -9,10 +14,14 @@ class SettingsPanel:
     """
 
     @staticmethod
-    def render_binary_settings(default_threshold: int = 128) -> int:
+    def render_binary_settings(default_threshold: int = None) -> int:
         """
         Отобразить настройки для бинаризации
         """
+        if default_threshold is None:
+            default_threshold = Config.DEFAULT_BINARY_THRESHOLD
+
+        logger.debug(f"Рендеринг настроек бинаризации (дефолт: {default_threshold})")
         st.markdown("### ⚙️ Настройки бинаризации")
 
         col1, col2 = st.columns([2, 1])
@@ -33,6 +42,7 @@ class SettingsPanel:
             st.markdown("- Чертежи: 80-100")
             st.markdown("- Фото с текстом: 180-200")
 
+        logger.info(f"Выбран порог бинаризации: {threshold}")
         return threshold
 
     @staticmethod
@@ -40,14 +50,12 @@ class SettingsPanel:
         """
         Отобразить настройки для выравнивания изображения
         """
+        logger.debug("Рендеринг настроек детекции линий")
         st.markdown("### ⚙️ Настройки детекции линий")
 
         if default_params is None:
-            default_params = {
-                "min_line_length": 50,
-                "max_line_gap": 20,
-                "use_morphology": True
-            }
+            default_params = Config.get_rotation_default_params()
+            logger.debug("Используются параметры по умолчанию из конфигурации")
 
         with st.expander("Настройки детекции линий", expanded=True):
             col1, col2 = st.columns(2)
@@ -86,36 +94,11 @@ class SettingsPanel:
             "use_morphology": use_morphology
         }
 
-        # Валидация параметров
-        return validate_line_detection_params(params)
-
-    @staticmethod
-    def render_file_preview_settings(file_info: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Отобразить настройки для предпросмотра файла
-        """
-        settings = {
-            "show_metadata": True,
-            "show_page_selector": True
-        }
-
-        if file_info.get("is_pdf", False):
-            settings["dpi"] = st.slider(
-                "DPI для отображения PDF",
-                min_value=72,
-                max_value=300,
-                value=150,
-                step=15,
-                help="Чем выше DPI, тем лучше качество, но дольше загрузка"
-            )
-
-        if file_info.get("is_docx", False):
-            settings["paragraphs_per_page"] = st.slider(
-                "Параграфов на страницу",
-                min_value=10,
-                max_value=100,
-                value=30,
-                step=5
-            )
-
-        return settings
+        try:
+            validated_params = validate_line_detection_params(params)
+            logger.info(f"Параметры детекции линий успешно валидированы: {validated_params}")
+            return validated_params
+        except Exception as e:
+            logger.error(f"Ошибка валидации параметров детекции линий: {e}", exc_info=True)
+            st.error("Некорректные параметры детекции линий. Используются значения по умолчанию.")
+            return Config.get_rotation_default_params()
