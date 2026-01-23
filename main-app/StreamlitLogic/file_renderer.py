@@ -2,6 +2,7 @@ import streamlit as st
 import fitz  # PyMuPDF
 from docx import Document
 from io import BytesIO
+from PIL import Image
 
 
 def render_file_preview(file_bytes, file_type, file_name, file_ext, title="Предпросмотр файла", show_metadata=True):
@@ -54,7 +55,7 @@ def render_file_preview(file_bytes, file_type, file_name, file_ext, title="Пр�
 
             # Отображение страницы
             page = pdf_doc.load_page(page_num)
-            pix = page.get_pixmap(dpi=200)
+            pix = page.get_pixmap(dpi=150)
             img_data = pix.tobytes("png")
             st.image(img_data, caption=f"Страница {page_num + 1} из {page_count}", width='stretch')
 

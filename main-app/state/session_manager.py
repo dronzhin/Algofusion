@@ -1,3 +1,4 @@
+# state/session_manager.py
 import streamlit as st
 from typing import Any, Optional, Dict, List
 
@@ -12,7 +13,7 @@ class SessionManager:
     BINARY_RESULTS = "binary_results"
     ROTATION_RESULTS = "rotation_results"
     LAST_UPLOADED_FILE = "last_uploaded_file"
-    SHOW_LINE_STATE = "show_line_state"  # Новое состояние для чекбокса
+    SHOW_LINE_STATE = "show_line_state"
 
     @classmethod
     def get_shared_file(cls) -> Optional[Dict[str, Any]]:
@@ -53,7 +54,6 @@ class SessionManager:
         if cls.BINARY_RESULTS in st.session_state:
             del st.session_state[cls.BINARY_RESULTS]
 
-    # === НОВЫЕ МЕТОДЫ ДЛЯ ВЫРАВНИВАНИЯ ===
     @classmethod
     def get_rotation_results(cls) -> Optional[Dict[str, Any]]:
         """Получить результаты выравнивания изображения"""

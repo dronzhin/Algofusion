@@ -38,7 +38,7 @@ class ImageService:
 
             # Настройки HoughLinesP
             min_line_length = params.get("min_line_length", 50)
-            max_line_gap = params.get("max_line_gap", 20)
+            max_line_gap = params.get("max_line_gap", 40)
 
             # Детекция линий
             lines = cv2.HoughLinesP(

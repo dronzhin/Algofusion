@@ -1,5 +1,4 @@
 # utils/__init__.py
-# Сначала импорты
 from .errors import (
     APIError,
     FileProcessingError,
@@ -19,6 +18,7 @@ from .validation import (
     validate_rotation_angle,
     validate_file_upload
 )
+from .logger import setup_app_logger
 from config import Config
 
 
@@ -83,5 +83,8 @@ __all__ = [
     "is_image_file",
     "is_pdf_file",
     "is_docx_file",
-    "is_supported_file"
+    "is_supported_file",
+
+    # logging
+    "setup_app_logger"
 ]

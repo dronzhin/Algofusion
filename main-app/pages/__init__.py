@@ -1,3 +1,4 @@
+# pages/__init__.py
 from .file_info import render_page as render_file_info
 from .binary_image import render_page as render_binary_image
 from .image_rotation import render_page as render_image_rotation

@@ -43,8 +43,6 @@ class Config:
             "max_retries": cls.API_MAX_RETRIES
         }
 
-    # === ЕДИНЫЙ ИСТОЧНИК ПРАВДЫ ДЛЯ ПРОВЕРОК ТИПОВ ФАЙЛОВ ===
-
     @classmethod
     def is_image_file(cls, file_type: str, file_ext: str) -> bool:
         """
