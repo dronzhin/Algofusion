@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional, Dict, List
 
 # Создаём логгер для этого модуля
-logger = logging.getLogger("ocr_app.state.session_manager")
+logger = logging.getLogger(f"app.{__name__}")
 
 class SessionManager:
     """
@@ -18,6 +18,7 @@ class SessionManager:
     ROTATION_RESULTS = "rotation_results"
     LAST_UPLOADED_FILE = "last_uploaded_file"
     SHOW_LINE_STATE = "show_line_state"
+    SESSION_INITIALIZED = "_session_initialized"
 
     @classmethod
     def get_shared_file(cls) -> Optional[Dict[str, Any]]:
@@ -117,7 +118,10 @@ class SessionManager:
     # === ИНИЦИАЛИЗАЦИЯ ===
     @classmethod
     def initialize_session(cls):
-        """Инициализация session_state при запуске приложения"""
+        """Инициализация session_state — только один раз за сессию"""
+        if st.session_state.get(cls.SESSION_INITIALIZED):
+            return  # Уже инициализировано — выходим
+
         logger.info("Инициализация сессии...")
         defaults = {
             cls.SHARED_FILE: None,
@@ -132,6 +136,8 @@ class SessionManager:
                 st.session_state[key] = default_value
                 logger.debug(f"Установлено значение по умолчанию для '{key}': {default_value}")
 
+        # Устанавливаем флаг
+        st.session_state[cls.SESSION_INITIALIZED] = True
         logger.info("Сессия инициализирована успешно")
 
     @classmethod
