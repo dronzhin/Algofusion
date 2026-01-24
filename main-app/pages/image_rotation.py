@@ -1,7 +1,7 @@
 # pages/image_rotation.py
 import streamlit as st
 from services import APIClient
-from components import FilePreviewComponent, SettingsPanel
+from components import FilePreviewComponent, SettingsPanel, show_unsupported_file_error
 from utils import handle_api_error, handle_file_error, handle_image_processing_error, convert_file_to_image, \
     get_file_icon
 from state import SessionManager
@@ -19,15 +19,8 @@ def render_page():
     """
     Страница выравнивания изображений с использованием SessionManager
     """
+
     st.subheader("📊 Выравнивание изображения по горизонтальной линии")
-    st.markdown("""
-    Этот инструмент найдет самую длинную горизонтальную линию на изображении,
-    определит ее угол наклона и автоматически выровняет изображение.
-
-    **Обработка выполняется на сервере** для максимальной производительности.
-
-    **Поддерживаются только:** PDF, JPG, PNG, BMP, GIF
-    """)
 
     def _clear_rotation_state():
         """Очистить состояние, связанное с выравниванием"""
@@ -44,7 +37,11 @@ def render_page():
 
     # Проверка поддержки формата
     if not Config.is_image_like_file(shared_file["type"], shared_file["ext"]):
-        _show_unsupported_format_error(shared_file)
+        show_unsupported_file_error(
+            file_info=shared_file,
+            supported_formats=list(Config.get_image_like_extensions()),
+            operation_name="выравнивания"
+        )
         _clear_rotation_state()
         return
 
@@ -66,19 +63,6 @@ def render_page():
 
     # Отображение результатов (если они есть)
     _display_results_if_available(shared_file["name"])
-
-def _show_unsupported_format_error(shared_file: dict):
-    """
-    Показать ошибку для неподдерживаемого формата
-    """
-    st.error(f"❌ Формат файла '{shared_file['ext']}' не поддерживается для выравнивания")
-    st.info("Поддерживаются только: PDF, JPG, JPEG, PNG, BMP, GIF")
-    st.markdown(f"""
-    **Текущий файл:** {shared_file['name']}
-    **Тип:** {shared_file['type']}
-    **Расширение:** {shared_file['ext']}
-    """)
-
 
 def _show_file_info(shared_file: dict):
     """

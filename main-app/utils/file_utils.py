@@ -1,3 +1,4 @@
+# utils/file_utils.py
 from pathlib import Path
 from typing import Dict, Any, Optional
 from config import Config  # Теперь импортируем отсюда

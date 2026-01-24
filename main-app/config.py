@@ -106,3 +106,8 @@ class Config:
         выравнивание, бинаризация, OCR и др.
         """
         return cls.is_image_file(file_type, file_ext) or cls.is_pdf_file(file_type, file_ext)
+
+    @classmethod
+    def get_image_like_extensions(cls) -> Set[str]:
+        """Получить все расширения, поддерживаемые для CV-инструментов (изображения + PDF)"""
+        return cls.SUPPORTED_IMAGE_EXTENSIONS | cls.SUPPORTED_PDF_EXTENSIONS

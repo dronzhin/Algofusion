@@ -1,3 +1,4 @@
+# utils/image_utils.py
 from PIL import Image
 import fitz  # PyMuPDF
 from io import BytesIO

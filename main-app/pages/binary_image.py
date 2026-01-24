@@ -1,6 +1,7 @@
+# pages/binary_image.py
 import streamlit as st
 from services import APIClient
-from components import FilePreviewComponent
+from components import FilePreviewComponent, show_unsupported_file_error
 from utils import handle_api_error
 from state import SessionManager
 import base64
@@ -10,7 +11,6 @@ from config import Config
 def render_page():
     """Основная функция рендеринга страницы"""
     st.subheader("🖨️ Конвертер в чёрно-белое (бинарное) изображение")
-    st.markdown("Использует файл, загруженный во вкладке 'Информация о файле'.")
 
     # Проверка наличия файла
     shared_file = SessionManager.get_shared_file()
@@ -20,7 +20,11 @@ def render_page():
 
     # Проверка поддержки файла
     if not Config.is_image_like_file(shared_file["type"], shared_file["ext"]):
-        _show_unsupported_file_error()
+        show_unsupported_file_error(
+            file_info=shared_file,
+            supported_formats=list(Config.get_image_like_extensions()),
+            operation_name="бинаризация"
+        )
         return
 
     # Отображение информации о файле
@@ -35,13 +39,6 @@ def render_page():
 
     # Отображение результатов
     _display_results(shared_file["name"])
-
-
-def _show_unsupported_file_error():
-    """Показать ошибку для неподдерживаемых файлов"""
-    st.error("❌ Конвертация в бинарный формат невозможна для этого типа файла.")
-    st.info("Поддерживаются только PDF, JPG и PNG файлы.")
-
 
 def _get_threshold_settings() -> int:
     """Получить настройки порога от пользователя"""
