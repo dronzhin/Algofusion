@@ -1,17 +1,18 @@
+# pages/image_rotation.py
 import streamlit as st
-from services.api_client import APIClient
-from components.file_preview import FilePreviewComponent
-from components.settings_panel import SettingsPanel
+from services import APIClient
+from components import FilePreviewComponent, SettingsPanel
 from utils import handle_api_error, handle_file_error, handle_image_processing_error, convert_file_to_image, \
     get_file_icon
-from state.session_manager import SessionManager
+from state import SessionManager
 import base64
 from io import BytesIO
 from PIL import Image
 import numpy as np
 import cv2
-import fitz  # PyMuPDF для PDF
+import fitz
 from pathlib import Path
+from config import Config
 
 
 def render_page():
@@ -28,25 +29,23 @@ def render_page():
     **Поддерживаются только:** PDF, JPG, PNG, BMP, GIF
     """)
 
-    # Инициализация сессии при первом запуске
-    if "session_initialized" not in st.session_state:
-        SessionManager.initialize_session()
-        st.session_state["session_initialized"] = True
+    def _clear_rotation_state():
+        """Очистить состояние, связанное с выравниванием"""
+        SessionManager.clear_rotation_results()
+        SessionManager.set_show_line_state(False)
 
     # Проверка наличия файла
     shared_file = SessionManager.get_shared_file()
     if not shared_file:
         st.warning("⚠️ Сначала загрузите файл во вкладке 'Информация о файле'")
         # Очищаем результаты при отсутствии файла
-        SessionManager.clear_rotation_results()
-        SessionManager.set_show_line_state(False)
+        _clear_rotation_state()
         return
 
     # Проверка поддержки формата
-    if not _is_supported_for_rotation(shared_file):
+    if not Config.is_image_like_file(shared_file["type"], shared_file["ext"]):
         _show_unsupported_format_error(shared_file)
-        SessionManager.clear_rotation_results()
-        SessionManager.set_show_line_state(False)
+        _clear_rotation_state()
         return
 
     # Отображение информации о файле
@@ -55,8 +54,7 @@ def render_page():
     # Подготовка изображения для обработки
     image_bytes = _prepare_image_for_rotation(shared_file)
     if not image_bytes:
-        SessionManager.clear_rotation_results()
-        SessionManager.set_show_line_state(False)
+        _clear_rotation_state()
         return
 
     # Настройки обработки
@@ -68,22 +66,6 @@ def render_page():
 
     # Отображение результатов (если они есть)
     _display_results_if_available(shared_file["name"])
-
-
-def _is_supported_for_rotation(shared_file: dict) -> bool:
-    """
-    Проверить, поддерживается ли файл для выравнивания
-    """
-    supported_types = [
-        "application/pdf",
-        "image/jpeg", "image/jpg", "image/png",
-        "image/bmp", "image/gif"
-    ]
-    supported_exts = [".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif"]
-
-    return (shared_file["type"] in supported_types or
-            shared_file["ext"].lower() in supported_exts)
-
 
 def _show_unsupported_format_error(shared_file: dict):
     """

@@ -1,9 +1,8 @@
 import streamlit as st
-from services.api_client import APIClient
-from components.file_preview import FilePreviewComponent
-from utils import is_supported_file
-from utils import handle_api_error
-from state.session_manager import SessionManager
+from services import APIClient
+from components import FilePreviewComponent
+from utils import is_supported_file, handle_api_error
+from state import SessionManager
 import base64
 
 
