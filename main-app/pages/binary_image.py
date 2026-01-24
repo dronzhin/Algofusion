@@ -1,9 +1,10 @@
 import streamlit as st
 from services import APIClient
 from components import FilePreviewComponent
-from utils import is_supported_file, handle_api_error
+from utils import handle_api_error
 from state import SessionManager
 import base64
+from config import Config
 
 
 def render_page():
@@ -18,7 +19,7 @@ def render_page():
         return
 
     # Проверка поддержки файла
-    if not is_supported_file(shared_file["type"], shared_file["ext"]):
+    if not Config.is_image_like_file(shared_file["type"], shared_file["ext"]):
         _show_unsupported_file_error()
         return
 

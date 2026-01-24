@@ -87,6 +87,15 @@ class Config:
                 file_ext in cls.SUPPORTED_DOCX_EXTENSIONS)
 
     @classmethod
+    def is_supported_file_type(cls, file_type: str, file_ext: str) -> bool:
+        """
+        Проверить, поддерживается ли тип файла для обработки
+        """
+        return (cls.is_image_file(file_type, file_ext) or
+                cls.is_pdf_file(file_type, file_ext) or
+                cls.is_docx_file(file_type, file_ext))
+
+    @classmethod
     def is_image_like_file(cls, file_type: str, file_ext: str) -> bool:
         """
         Проверяет, является ли файл 'изображением' в широком смысле:
@@ -97,4 +106,3 @@ class Config:
         выравнивание, бинаризация, OCR и др.
         """
         return cls.is_image_file(file_type, file_ext) or cls.is_pdf_file(file_type, file_ext)
-

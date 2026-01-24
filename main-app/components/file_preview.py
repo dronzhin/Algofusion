@@ -4,7 +4,6 @@ import fitz
 from docx import Document
 from io import BytesIO
 import logging
-from utils import is_image_file, is_pdf_file, is_docx_file
 from config import Config
 
 # Создаём логгер для этого модуля
@@ -27,13 +26,13 @@ class FilePreviewComponent:
             FilePreviewComponent._show_metadata(file_name, file_type, file_ext)
 
         try:
-            if is_image_file(file_type, file_ext):
+            if Config.is_image_file(file_type, file_ext):
                 logger.info(f"Рендеринг изображения: {file_name}")
                 FilePreviewComponent._render_image(file_bytes)
-            elif is_pdf_file(file_type, file_ext):
+            elif Config.is_pdf_file(file_type, file_ext):
                 logger.info(f"Рендеринг PDF: {file_name}")
                 FilePreviewComponent._render_pdf(file_bytes, file_name)
-            elif is_docx_file(file_type, file_ext):
+            elif Config.is_docx_file(file_type, file_ext):
                 logger.info(f"Рендеринг DOCX: {file_name}")
                 FilePreviewComponent._render_docx(file_bytes, file_name)
             else:
