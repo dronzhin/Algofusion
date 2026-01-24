@@ -4,7 +4,6 @@ from .errors import (
     FileProcessingError,
     ValidationError,
     ImageProcessingError,  # Новое исключение
-    error_handler
 )
 from .file_utils import (
     get_file_metadata,
@@ -20,26 +19,6 @@ from .validation import (
 )
 from .logger import setup_app_logger
 
-# Определяем функции-обертки ДО __all__
-def handle_api_error(error: Exception, operation_name: str = "операция"):
-    """Универсальный обработчик ошибок API"""
-    return error_handler.handle_api_error(error, operation_name)
-
-
-def handle_file_error(error: Exception, file_name: str = "файл"):
-    """Универсальный обработчик ошибок файлов"""
-    return error_handler.handle_file_error(error, file_name)
-
-
-def handle_image_processing_error(error: Exception, operation_name: str = "обработка"):
-    """Универсальный обработчик ошибок обработки изображений"""
-    return error_handler.handle_image_processing_error(error, operation_name)
-
-
-def show_success(message: str, operation_name: str = "операция"):
-    """Показать сообщение об успехе"""
-    return error_handler.show_success_message(message, operation_name)
-
 # Теперь включаем ВСЕ публичные имена в __all__
 __all__ = [
     # errors
@@ -48,12 +27,6 @@ __all__ = [
     "ValidationError",
     "ImageProcessingError",  # Новое исключение
     "error_handler",
-
-    # error handlers (функции-обертки)
-    "handle_api_error",
-    "handle_file_error",
-    "handle_image_processing_error",
-    "show_success",
 
     # file_utils
     "get_file_metadata",

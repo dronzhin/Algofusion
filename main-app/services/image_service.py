@@ -1,9 +1,8 @@
 import cv2
 import numpy as np
 from PIL import Image
-import base64
 from io import BytesIO
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from config import Config
 
 
