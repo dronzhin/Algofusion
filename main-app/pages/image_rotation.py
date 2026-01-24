@@ -197,7 +197,7 @@ def _display_results_if_available(original_filename: str):
         st.markdown("**Исходное изображение**")
         try:
             original_img = Image.open(BytesIO(original_image_bytes))
-            st.image(original_img, use_container_width=True)
+            st.image(original_img, width='stretch')
         except Exception as e:
             st.error(f"Ошибка отображения исходного изображения: {e}")
 
@@ -205,7 +205,7 @@ def _display_results_if_available(original_filename: str):
         st.markdown("**Выровненное изображение**")
         try:
             rotated_img = Image.open(BytesIO(rotated_bytes))
-            st.image(rotated_img, use_container_width=True)
+            st.image(rotated_img, width='stretch')
         except Exception as e:
             st.error(f"Ошибка отображения выровненного изображения: {e}")
 
@@ -266,7 +266,7 @@ def _visualize_detected_line(image_bytes: bytes, line_info: dict):
         cv2.line(img_array, start_point, end_point, (0, 0, 255), 3)  # Красная линия
 
         # Отображение
-        st.image(img_array, caption="Исходное изображение с найденной линией", use_container_width=True)
+        st.image(img_array, caption="Исходное изображение с найденной линией", width='stretch')
 
     except Exception as e:
         st.warning(f"Не удалось отобразить линию: {e}")

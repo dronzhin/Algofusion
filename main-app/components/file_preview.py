@@ -51,7 +51,7 @@ class FilePreviewComponent:
     @staticmethod
     def _render_image(file_bytes: bytes):
         try:
-            st.image(file_bytes, caption="Изображение", use_container_width=True)
+            st.image(file_bytes, caption="Изображение", width='stretch')
             logger.debug("Изображение успешно отображено")
         except Exception as e:
             logger.error(f"Ошибка отображения изображения: {e}")
@@ -82,7 +82,7 @@ class FilePreviewComponent:
             page = pdf_doc.load_page(page_num)
             pix = page.get_pixmap(dpi=Config.DEFAULT_DPI)
             img_data = pix.tobytes("png")
-            st.image(img_data, caption=f"Страница {page_num + 1} из {page_count}", use_container_width=True)
+            st.image(img_data, caption=f"Страница {page_num + 1} из {page_count}", width='stretch')
             logger.debug(f"Отображена страница {page_num + 1} PDF")
 
             pdf_doc.close()
