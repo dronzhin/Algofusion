@@ -18,12 +18,12 @@ class FilePreviewComponent:
 
     @staticmethod
     def render(file_bytes: bytes, file_type: str, file_name: str, file_ext: str,
-               title: str = "Предпросмотр файла", show_meta: bool = True):
+               title: str = "Предпросмотр файла", show_meta: bool = True): # Исправлено имя параметра
         """Основной метод рендеринга"""
         logger.debug(f"Начало рендеринга превью для файла: {file_name} ({file_type})")
         st.subheader(title)
 
-        if show_metadata:
+        if show_meta: # Используем исправленное имя
             FilePreviewComponent._show_metadata(file_name, file_type, file_ext)
 
         try:
@@ -38,7 +38,7 @@ class FilePreviewComponent:
                 FilePreviewComponent._render_docx(file_bytes, file_name)
             else:
                 logger.warning(f"Неподдерживаемый тип файла: {file_name} ({file_type}, {file_ext})")
-                FilePreviewComponent._render_generic(file_bytes, file_ext)
+                FilePreviewComponent._render_generic(file_bytes)
         except Exception as e:
             logger.error(f"Необработанная ошибка при рендеринге {file_name}: {e}", exc_info=True)
             st.error("Произошла непредвиденная ошибка при отображении файла.")
@@ -129,7 +129,7 @@ class FilePreviewComponent:
             st.error(f"Ошибка при чтении DOCX: {e}")
 
     @staticmethod
-    def _render_generic(file_bytes: bytes, file_ext: str):
+    def _render_generic(file_bytes: bytes):
         st.info("Предпросмотр недоступен для этого типа файла.")
         if isinstance(file_bytes, bytes) and len(file_bytes) < 10000:
             try:
@@ -141,7 +141,6 @@ class FilePreviewComponent:
             except Exception as e:
                 logger.warning(f"Ошибка при попытке отобразить содержимое: {e}")
 
-    # --- Новый метод ---
     @staticmethod
     def render_file_info_and_page_selector(shared_file: dict, session_state_key_prefix: str = "file_display") -> int:
         """
@@ -194,21 +193,19 @@ class FilePreviewComponent:
             # Используем уникальный ключ для session_state
             page_selector_key = f"{key_prefix}_pdf_page_selector"
 
-            # Проверяем, установлено ли уже состояние, иначе устанавливаем по умолчанию
+            # Устанавливаем начальное значение в session_state, если его нет
             if page_selector_key not in st.session_state:
-                st.session_state[page_selector_key] = 0
+                st.session_state[page_selector_key] = 1 # Установим в 1-indexed значение по умолчанию
 
-            page_num_1_indexed = st.number_input(
-                "Выберите страницу для обработки:",
-                min_value=1,
-                max_value=page_count,
-                value=st.session_state[page_selector_key] + 1, # Отображаем 1-indexed
-                step=1,
-                key=page_selector_key
-            )
+            # Нормализуем значение в session_state, если оно выходит за границы
+            current_value = st.session_state[page_selector_key]
+            if not (1 <= current_value <= page_count):
+                st.session_state[page_selector_key] = 1
+                logger.warning(f"Значение session_state {page_selector_key} ({current_value}) вне диапазона [1, {page_count}], сброшено на 1.")
 
             current_selected_1_indexed = st.session_state[page_selector_key]
             selected_page_num_0_indexed = current_selected_1_indexed - 1
+
             logger.debug(f"PDF страница выбрана: {selected_page_num_0_indexed} (0-indexed) (key: {page_selector_key})")
 
             return selected_page_num_0_indexed

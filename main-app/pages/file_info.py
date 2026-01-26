@@ -67,7 +67,7 @@ def render_page():
             file_name=file_name,
             file_ext=file_ext,
             title="📥 Исходный файл",
-            show_metadata=True
+            show_meta=True # Теперь соответствует исправленному параметру в render
         )
         logger.debug("Превью файла успешно отображено")
     except Exception as e:
