@@ -2,7 +2,7 @@
 import streamlit as st
 from services import APIClient
 from components import FilePreviewComponent, SettingsPanel, show_unsupported_file_error, \
-    handle_api_error, handle_file_error, handle_image_processing_error
+    handle_api_error, handle_file_error, handle_image_processing_error, ImageComparisonComponent # Добавлен ImageComparisonComponent
 from utils import convert_file_to_image, get_file_icon
 from state import SessionManager
 import base64
@@ -44,19 +44,12 @@ def render_page():
         _clear_rotation_state()
         return
 
-    # --- ИСПОЛЬЗУЕМ FilePreviewComponent.render_file_info_and_page_selector ---
     selected_page_num = FilePreviewComponent.render_file_info_and_page_selector(
-        shared_file, session_state_key_prefix="rotation" # Уникальный префикс для этой страницы
+        shared_file, session_state_key_prefix="rotation"
     )
-    # --- /ИСПОЛЬЗУЕМ ---
-
 
     # Подготовка изображения для обработки
-    # --- ПЕРЕДАЁМ выбранный номер страницы ---
     image_bytes = _prepare_image_for_rotation(shared_file, selected_page_num)
-    # --- /ПЕРЕДАЁМ ---
-
-
     if not image_bytes:
         _clear_rotation_state()
         return
@@ -78,14 +71,12 @@ def _prepare_image_for_rotation(shared_file: dict, page_num: int) -> bytes:
     """
     with st.spinner("🔄 Подготовка изображения для обработки..."):
         try:
-            # --- ИСПОЛЬЗУЕМ переданный page_num ---
             image_bytes = convert_file_to_image(
                 file_bytes=shared_file["bytes"],
                 file_type=shared_file["type"],
                 file_ext=shared_file["ext"],
-                page_num=page_num # Передаем выбранный номер страницы
+                page_num=page_num
             )
-            # --- /ИСПОЛЬЗУЕМ ---
 
             if not image_bytes:
                 st.error("❌ Не удалось подготовить изображение для обработки")
@@ -155,28 +146,14 @@ def _display_results_if_available(original_filename: str):
     rotated_bytes = rotation_results["rotated_bytes"]
     rotation_angle = rotation_results["rotation_angle"]
     line_info = rotation_results["line_info"]
-    params = rotation_results.get("params", {})
 
-    # Отображение результатов
-    st.markdown(f"### 🎯 Результат выравнивания (угол: {rotation_angle:.2f}°)")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**Исходное изображение**")
-        try:
-            original_img = Image.open(BytesIO(original_image_bytes))
-            st.image(original_img, width='stretch')
-        except Exception as e:
-            st.error(f"Ошибка отображения исходного изображения: {e}")
-
-    with col2:
-        st.markdown("**Выровненное изображение**")
-        try:
-            rotated_img = Image.open(BytesIO(rotated_bytes))
-            st.image(rotated_img, width='stretch')
-        except Exception as e:
-            st.error(f"Ошибка отображения выровненного изображения: {e}")
+    ImageComparisonComponent.render(
+        image1_bytes=original_image_bytes,
+        image2_bytes=rotated_bytes,
+        label1="Исходное изображение",
+        label2="Выровненное изображение",
+        caption=f"### 🎯 Результат выравнивания (угол: {rotation_angle:.2f}°)"
+    )
 
     # Информация о найденной линии
     if line_info:

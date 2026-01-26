@@ -3,6 +3,7 @@ from .file_preview import FilePreviewComponent
 from .settings_panel import SettingsPanel
 from .ui_helpers import show_unsupported_file_error
 from .error_handler import error_handler
+from .image_comparison import ImageComparisonComponent
 
 # Определяем функции-обертки ДО __all__
 def handle_api_error(error: Exception, operation_name: str = "операция"):
@@ -28,6 +29,7 @@ __all__ = [
     "FilePreviewComponent",
     "SettingsPanel",
     "show_unsupported_file_error",
+    "ImageComparisonComponent",
 
     # error handlers (функции-обертки)
     "handle_api_error",
