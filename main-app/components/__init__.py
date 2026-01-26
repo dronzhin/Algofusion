@@ -1,7 +1,7 @@
 # components/__init__.py
 from .file_preview import FilePreviewComponent
 from .settings_panel import SettingsPanel
-from .ui_helpers import show_unsupported_file_error
+from .ui_helpers import show_unsupported_file_error, show_download_button
 from .error_handler import error_handler
 from .image_comparison import ImageComparisonComponent
 
@@ -30,6 +30,7 @@ __all__ = [
     "SettingsPanel",
     "show_unsupported_file_error",
     "ImageComparisonComponent",
+    "show_download_button",
 
     # error handlers (функции-обертки)
     "handle_api_error",

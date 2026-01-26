@@ -2,7 +2,7 @@
 import streamlit as st
 from services import APIClient
 from components import FilePreviewComponent, SettingsPanel, show_unsupported_file_error, \
-    handle_api_error, handle_file_error, handle_image_processing_error, ImageComparisonComponent # Добавлен ImageComparisonComponent
+    handle_api_error, handle_file_error, handle_image_processing_error, ImageComparisonComponent, show_download_button
 from utils import convert_file_to_image, get_file_icon
 from state import SessionManager
 import base64
@@ -10,6 +10,7 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 import cv2
+import fitz
 from pathlib import Path
 from config import Config
 
@@ -44,6 +45,7 @@ def render_page():
         _clear_rotation_state()
         return
 
+    # Используем FilePreviewComponent.render_file_info_and_page_selector
     selected_page_num = FilePreviewComponent.render_file_info_and_page_selector(
         shared_file, session_state_key_prefix="rotation"
     )
@@ -146,7 +148,9 @@ def _display_results_if_available(original_filename: str):
     rotated_bytes = rotation_results["rotated_bytes"]
     rotation_angle = rotation_results["rotation_angle"]
     line_info = rotation_results["line_info"]
+    params = rotation_results.get("params", {})
 
+    # --- ИСПОЛЬЗУЕМ ImageComparisonComponent ---
     ImageComparisonComponent.render(
         image1_bytes=original_image_bytes,
         image2_bytes=rotated_bytes,
@@ -154,6 +158,7 @@ def _display_results_if_available(original_filename: str):
         label2="Выровненное изображение",
         caption=f"### 🎯 Результат выравнивания (угол: {rotation_angle:.2f}°)"
     )
+    # --- /ИСПОЛЬЗУЕМ ---
 
     # Информация о найденной линии
     if line_info:
@@ -228,10 +233,10 @@ def _show_download_button(rotated_bytes: bytes, original_filename: str, rotation
     file_stem = Path(original_filename).stem
     output_filename = f"aligned_{file_stem}_{rotation_angle:.1f}deg.png"
 
-    st.download_button(
-        label="📥 Скачать выровненное изображение",
+    show_download_button(
         data=rotated_bytes,
         file_name=output_filename,
-        mime="image/png",
+        mime_type="image/png",
+        label="📥 Скачать выровненное изображение",
         key="download_rotated_result"
     )

@@ -145,3 +145,32 @@ class SessionManager:
         cls.clear_binary_results()
         cls.clear_rotation_results()
         cls.set_show_line_state(False)
+
+    @staticmethod
+    def set_binary_results(images: list, threshold: int, original_filename: str, original_page_num: int = 0):
+        """
+        Сохраняет результаты бинаризации.
+
+        Args:
+            images (list): Список байтов бинарных изображений (обычно одно для одной страницы).
+            threshold (int): Использованный порог.
+            original_filename (str): Имя исходного файла.
+            original_page_num (int): Номер исходной страницы (0-indexed).
+        """
+        st.session_state.binary_results = {
+            "images": images,
+            "threshold": threshold,
+            "original_filename": original_filename,
+            "original_page_num": original_page_num  # Новое поле
+        }
+
+    @staticmethod
+    def get_binary_results():
+        """Возвращает результаты бинаризации."""
+        return st.session_state.get("binary_results")
+
+    @staticmethod
+    def clear_binary_results():
+        """Очищает результаты бинаризации."""
+        if "binary_results" in st.session_state:
+            del st.session_state["binary_results"]

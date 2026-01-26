@@ -18,7 +18,7 @@ class FilePreviewComponent:
 
     @staticmethod
     def render(file_bytes: bytes, file_type: str, file_name: str, file_ext: str,
-               title: str = "Предпросмотр файла", show_metadata: bool = True):
+               title: str = "Предпросмотр файла", show_meta: bool = True):
         """Основной метод рендеринга"""
         logger.debug(f"Начало рендеринга превью для файла: {file_name} ({file_type})")
         st.subheader(title)
@@ -141,6 +141,7 @@ class FilePreviewComponent:
             except Exception as e:
                 logger.warning(f"Ошибка при попытке отобразить содержимое: {e}")
 
+    # --- Новый метод ---
     @staticmethod
     def render_file_info_and_page_selector(shared_file: dict, session_state_key_prefix: str = "file_display") -> int:
         """
@@ -206,13 +207,10 @@ class FilePreviewComponent:
                 key=page_selector_key
             )
 
-            # Обновляем session_state, если пользователь выбрал другую страницу
-            selected_page_num_0_indexed = page_num_1_indexed - 1
-            if st.session_state[page_selector_key] != selected_page_num_0_indexed:
-                 st.session_state[page_selector_key] = selected_page_num_0_indexed
-                 logger.info(f"Выбрана страница {selected_page_num_0_indexed + 1} для файла {shared_file['name']}.")
+            current_selected_1_indexed = st.session_state[page_selector_key]
+            selected_page_num_0_indexed = current_selected_1_indexed - 1
+            logger.debug(f"PDF страница выбрана: {selected_page_num_0_indexed} (0-indexed) (key: {page_selector_key})")
 
-            logger.debug(f"PDF страница выбрана: {selected_page_num_0_indexed} (0-indexed)")
             return selected_page_num_0_indexed
 
         except Exception as e:

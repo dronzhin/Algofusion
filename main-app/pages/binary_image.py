@@ -1,7 +1,7 @@
 # pages/binary_image.py
 import streamlit as st
 from services import APIClient
-from components import FilePreviewComponent, show_unsupported_file_error, handle_api_error
+from components import FilePreviewComponent, SettingsPanel, show_unsupported_file_error, handle_api_error, show_download_button
 from state import SessionManager
 import base64
 from config import Config
@@ -26,64 +26,53 @@ def render_page():
         )
         return
 
-    # Отображение информации о файле
-    st.info(f"📄 Используется файл: **{shared_file['name']}**")
+    # --- ИСПОЛЬЗУЕМ FilePreviewComponent.render_file_info_and_page_selector ---
+    # Обратите внимание: это для выбора страницы *исходного* файла перед обработкой
+    selected_page_num_for_source = FilePreviewComponent.render_file_info_and_page_selector(
+        shared_file, session_state_key_prefix="binary_source"
+    )
+    # --- /ИСПОЛЬЗУЕМ ---
 
-    # Настройки бинаризации
-    threshold_value = _get_threshold_settings()
+    # --- ИСПОЛЬЗУЕМ SettingsPanel.render_binary_settings ---
+    threshold_value = SettingsPanel.render_binary_settings()
+    # --- /ИСПОЛЬЗУЕМ ---
 
     # Кнопка конвертации
     if st.button(f"🔄 Конвертировать с порогом {threshold_value}", type="primary"):
-        _process_conversion(shared_file, threshold_value)
+        _process_conversion(shared_file, threshold_value, selected_page_num_for_source) # Передаём page_num
 
     # Отображение результатов
     _display_results(shared_file["name"])
 
-def _get_threshold_settings() -> int:
-    """Получить настройки порога от пользователя"""
-    col1, col2 = st.columns([2, 1])
 
-    with col1:
-        threshold = st.number_input(
-            "Порог бинаризации (0-255)",
-            min_value=0,
-            max_value=255,
-            value=128,
-            step=1,
-            help="Значение яркости: выше порога → белый, ниже → черный"
-        )
-
-    with col2:
-        st.markdown("**Рекомендации:**")
-        st.markdown("- Документы: 120-150")
-        st.markdown("- Чертежи: 80-100")
-        st.markdown("- Фото с текстом: 180-200")
-
-    return threshold
-
-
-def _process_conversion(shared_file: dict, threshold_value: int):
+def _process_conversion(shared_file: dict, threshold_value: int, page_num: int): # Принимаем page_num
     """Обработка конвертации файла"""
     api_client = APIClient()
 
     with st.spinner(f"🔄 Конвертация с порогом {threshold_value}..."):
         try:
+            # --- ПЕРЕДАЁМ page_num в API клиент ---
+            # Предполагаем, что API и его клиент теперь принимают page_num
             result = api_client.convert_to_binary(
                 file_data=shared_file["bytes"],
                 filename=shared_file["name"],
-                threshold=threshold_value
+                threshold=threshold_value,
+                page_num=page_num
             )
+            # --- /ПЕРЕДАЁМ ---
 
             # Сохранение результатов в сессию
-            images_b64 = result.get("images_base64", [])
-            if not images_b64:
+            # Предполагаем, что API теперь возвращает один результат для одной страницы
+            image_b64 = result.get("image_base64") # Изменим структуру ответа
+            if not image_b64:
                 st.error("Пустой результат от сервера.")
                 return
 
-            binary_images = [base64.b64decode(b64_str) for b64_str in images_b64]
-            SessionManager.set_binary_results(binary_images, threshold_value, shared_file["name"])
+            binary_image = base64.b64decode(image_b64)
+            # Сохраняем один результат и номер страницы
+            SessionManager.set_binary_results([binary_image], threshold_value, shared_file["name"], selected_page_num_for_source)
 
-            st.success(f"✅ Конвертация выполнена успешно!")
+            st.success(f"✅ Конвертация выполнена успешно! (страница {page_num + 1})")
 
         except Exception as e:
             handle_api_error(e)
@@ -98,52 +87,48 @@ def _display_results(original_filename: str):
 
     images = binary_results["images"]
     threshold = binary_results["threshold"]
-    page_count = len(images)
 
-    # Выбор страницы
-    page_num = _select_page_number(page_count)
+    if not images:
+        st.warning("Результат обработки пуст.")
+        return
 
-    # Отображение выбранной страницы
-    if 0 <= page_num < page_count:
-        _render_result_page(images[page_num], page_num, page_count, threshold, original_filename)
+    # Берём первую (и единственную) страницу результата
+    img_data = images[0]
 
-
-def _select_page_number(page_count: int) -> int:
-    """Выбор номера страницы для отображения"""
-    if page_count > 1:
-        return st.number_input(
-            "Номер страницы",
-            min_value=1,
-            max_value=page_count,
-            value=1,
-            step=1,
-            key="binary_page_selector"
-        ) - 1
-    else:
-        st.info("📄 Результат содержит одну страницу")
-        return 0
+    # Отображение результата
+    _render_result_page(img_data, threshold, original_filename)
 
 
-def _render_result_page(img_data: bytes, page_num: int, page_count: int,
-                        threshold: int, original_filename: str):
-    """Отображение результата для конкретной страницы"""
-    page_title = f"Страница {page_num + 1} из {page_count} (порог={threshold})"
+def _render_result_page(img_bytes, threshold: int, original_filename: str):
+    """Отображение результата бинаризации одной страницы."""
+
+    # ВВОД КОНСТАНТЫ ИМЕЕТ СМЫСЛ, потому что значение используется в нескольких местах.
+    # Если логика изменится (хотя и маловероятно для этого сценария), нужно изменить только здесь.
+    RESULT_PAGE_NUM_FOR_THIS_VIEW = 0
+
+    # ВВОД КОНСТАНТЫ НЕ ИМЕЕТ СМЫСЛА, потому что она не используется в теле функции.
+    # RESULT_PAGE_COUNT = 1
+
+    # Используем RESULT_PAGE_NUM_FOR_THIS_VIEW
+    page_title = f"Бинарное изображение (страница {RESULT_PAGE_NUM_FOR_THIS_VIEW + 1}, порог={threshold})"
 
     # Использование компонента предпросмотра
     FilePreviewComponent.render(
         file_bytes=img_data,
         file_type="image/png",
-        file_name=f"page_{page_num + 1}_binary.png",
+        file_name=f"binary_result_{original_filename}.png",
         file_ext=".png",
         title=page_title,
         show_metadata=False
     )
 
-    # Кнопка скачивания
-    st.download_button(
-        label="📥 Скачать эту страницу",
+    output_filename = f"binary_{original_filename}_page_{RESULT_PAGE_NUM_FOR_THIS_VIEW + 1}_threshold_{threshold}.png"
+
+    # Используем RESULT_PAGE_NUM_FOR_THIS_VIEW снова
+    show_download_button(
         data=img_data,
-        file_name=f"binary_page_{page_num + 1}_threshold_{threshold}.png",
-        mime="image/png",
-        key=f"download_page_{page_num}"
-    )
+        file_name=output_filename,
+        mime_type="image/png",
+        label="📥 Скачать бинарное изображение",
+        key=f"download_binary_result_{RESULT_PAGE_NUM_FOR_THIS_VIEW}"  # <-- Вот здесь
+)
