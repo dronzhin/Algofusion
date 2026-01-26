@@ -63,7 +63,7 @@ choco install poppler
 ## ▶️ Базовый запуск
 
 ```bash
-uvicorn main:app --reload
+uvicorn app:app --reload
 ```
 
 **По умолчанию:**
@@ -82,22 +82,22 @@ uvicorn main:app --reload
 ### Изменение порта через параметры Uvicorn
 ```bash
 # Запуск на порту 8080
-uvicorn main:app --port 8080
+uvicorn app:app --port 8080
 
 # Запуск с указанием хоста и порта
-uvicorn main:app --host 0.0.0.0 --port 9000
+uvicorn app:app --host 0.0.0.0 --port 9000
 
 # Production-запуск без перезагрузки
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ### Изменение порта через переменные окружения
 ```bash
 # Linux/Mac
-PORT=8080 uvicorn main:app --host 0.0.0.0
+PORT=8080 uvicorn app:app --host 0.0.0.0
 
 # Windows (PowerShell)
-$env:PORT=8080; uvicorn main:app --host 0.0.0.0
+$env:PORT=8080; uvicorn app:app --host 0.0.0.0
 ```
 
 ## 📊 Режимы логирования
