@@ -10,7 +10,6 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 import cv2
-import fitz
 from pathlib import Path
 from config import Config
 
@@ -45,11 +44,19 @@ def render_page():
         _clear_rotation_state()
         return
 
-    # Отображение информации о файле
-    _show_file_info(shared_file)
+    # --- ИСПОЛЬЗУЕМ FilePreviewComponent.render_file_info_and_page_selector ---
+    selected_page_num = FilePreviewComponent.render_file_info_and_page_selector(
+        shared_file, session_state_key_prefix="rotation" # Уникальный префикс для этой страницы
+    )
+    # --- /ИСПОЛЬЗУЕМ ---
+
 
     # Подготовка изображения для обработки
-    image_bytes = _prepare_image_for_rotation(shared_file)
+    # --- ПЕРЕДАЁМ выбранный номер страницы ---
+    image_bytes = _prepare_image_for_rotation(shared_file, selected_page_num)
+    # --- /ПЕРЕДАЁМ ---
+
+
     if not image_bytes:
         _clear_rotation_state()
         return
@@ -64,59 +71,21 @@ def render_page():
     # Отображение результатов (если они есть)
     _display_results_if_available(shared_file["name"])
 
-def _show_file_info(shared_file: dict):
-    """
-    Отображение информации о файле
-    """
-    icon = get_file_icon(shared_file["type"], shared_file["ext"])
-    st.info(f"{icon} Работаем с файлом: **{shared_file['name']}**")
 
-    # Выбор страницы для PDF
-    if shared_file["type"] == "application/pdf" or shared_file["ext"].lower() == ".pdf":
-        _show_pdf_page_selector(shared_file)
-
-
-def _show_pdf_page_selector(shared_file: dict):
-    """
-    Показать селектор страницы для PDF
-    """
-    try:
-        pdf_doc = fitz.open(stream=BytesIO(shared_file["bytes"]), filetype="pdf")
-        page_count = pdf_doc.page_count
-        pdf_doc.close()
-
-        if page_count > 1:
-            page_num = st.number_input(
-                "Выберите страницу для выравнивания:",
-                min_value=1,
-                max_value=page_count,
-                value=1,
-                step=1,
-                key="pdf_page_selector_rotation"
-            )
-            st.session_state["rotation_page_num"] = page_num - 1
-        else:
-            st.info("📄 PDF содержит одну страницу")
-            st.session_state["rotation_page_num"] = 0
-
-    except Exception as e:
-        handle_file_error(e, "PDF документ")
-
-
-def _prepare_image_for_rotation(shared_file: dict) -> bytes:
+def _prepare_image_for_rotation(shared_file: dict, page_num: int) -> bytes:
     """
     Подготовка изображения для выравнивания
     """
     with st.spinner("🔄 Подготовка изображения для обработки..."):
         try:
-            page_num = st.session_state.get("rotation_page_num", 0)
-
+            # --- ИСПОЛЬЗУЕМ переданный page_num ---
             image_bytes = convert_file_to_image(
                 file_bytes=shared_file["bytes"],
                 file_type=shared_file["type"],
                 file_ext=shared_file["ext"],
-                page_num=page_num
+                page_num=page_num # Передаем выбранный номер страницы
             )
+            # --- /ИСПОЛЬЗУЕМ ---
 
             if not image_bytes:
                 st.error("❌ Не удалось подготовить изображение для обработки")
