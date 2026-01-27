@@ -1,14 +1,16 @@
+# endpoints/convert.py
+"""
+Эндпоинт для конвертации изображений
+"""
 from fastapi import UploadFile, HTTPException
 from typing import Dict, List, Union
 import io
 from PIL import Image
-from utils.image_processing import binary_convert
-from utils.pdf_processing import convert_pdf_to_images
+from utils import binary_convert, convert_pdf_to_images, get_logger  # Используем импорт через __init__.py
 import base64
-import logging
 import traceback
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def convert_image_endpoint(file: UploadFile, threshold: int = 128) -> Dict[str, Union[List[str], str]]:

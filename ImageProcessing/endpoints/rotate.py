@@ -1,14 +1,16 @@
+# endpoints/rotate.py
+"""
+Эндпоинт для поворота изображений
+"""
 from fastapi import UploadFile, HTTPException
 from typing import Dict, Union, Optional
 import base64
 import cv2
 import numpy as np
-import io
-from PIL import Image
-import logging
+from utils import get_logger
 import traceback
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def rotate_image_endpoint(

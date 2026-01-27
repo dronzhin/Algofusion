@@ -1,11 +1,14 @@
+# utils/image_processing.py
+"""
+Утилиты для обработки изображений
+"""
 import cv2
 import numpy as np
 from PIL import Image
+from utils.logging_config import get_logger
 import io
-import base64
-import logging
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 def binary_convert(image_bytes: bytes, threshold: int) -> bytes:
     """
