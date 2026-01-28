@@ -1,0 +1,27 @@
+@startuml
+left to right direction
+
+package "Frontend" {
+  [Streamlit App]
+}
+
+package "Core Services" {
+  [Auth Service]
+  [ML Service]
+  [Session Manager]
+}
+
+package "Storage" {
+  database "MinIO"
+}
+
+[Streamlit App] --> [Auth Service] : JWT validation
+[Streamlit App] --> [Session Manager] : session CRUD
+[Streamlit App] --> [ML Service] : /analyze
+[ML Service] --> [MinIO] : store/fetch files
+[Streamlit App] --> [MinIO] : direct upload (presigned URL)
+
+note right of [ML Service]
+  Supports multiple tools:\n- image_rotation\n- binary_processing\n- future CV/NLP
+end note
+@enduml

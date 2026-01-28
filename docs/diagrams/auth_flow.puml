@@ -1,0 +1,118 @@
+@startuml
+title Многостраничный workflow с валидацией в Algofusion
+
+box "Пользователь" #e0f7fa
+  actor "Аналитик" as User
+end box
+
+box "Frontend" #bbdefb
+  boundary "Streamlit App" as UI
+end box
+
+box "Core Services" #d1c4e9
+  control "Session Manager" as Session
+  control "Сервер ImageProcessing" as ImageProc
+end box
+
+box "Хранилище" #fff8e1
+  database "MinIO" as Storage
+end box
+
+' === Шаг 1: Инициализация сессии ===
+User -> UI : Открыть приложение
+activate UI
+UI -> Session : Инициализировать сессию\n(дефолтные параметры)
+activate Session
+Session -> Session : current_file_id = null, ...
+Session --> UI : Сессия готова
+deactivate Session
+UI --> User : Главная страница ("Загрузить файл")
+deactivate UI
+
+' === Шаг 2: Страница 1 — Загрузка с валидацией типа ===
+User -> UI : [Страница: Загрузка] Загрузить "malware.exe"
+activate UI
+
+UI -> UI : Проверить расширение файла\n(разрешены: .jpg, .png, .pdf)
+alt Недопустимый тип файла
+  UI -->x User : Ошибка: формат не поддерживается!\nРазрешены: JPG, PNG, PDF
+  deactivate UI
+else Допустимый тип
+  UI -> Storage : Сохранить raw-файл
+  activate Storage
+  Storage --> UI : file_id = f123
+  deactivate Storage
+
+  UI -> Session : Обновить current_file_id = "f123"
+  Session --> UI : OK
+  UI --> User : Файл загружен. Перейти на "Поворот"
+  deactivate UI
+end
+
+' === Шаг 3: Страница 2 — Поворот с проверкой загрузки ===
+User -> UI : [Страница: Поворот] Нажать "Повернуть"
+activate UI
+
+UI -> Session : Получить current_file_id
+Session --> UI : current_file_id = null
+
+alt Файл не загружен
+  UI -->x User : Ошибка: сначала загрузите файл\nна странице "Загрузка"
+  deactivate UI
+else Файл загружен
+  UI -> ImageProc : POST /analyze {tool: "image_rotation", ...}
+  activate ImageProc
+  ImageProc -> Storage : Получить файл
+  activate Storage
+  Storage --> ImageProc : Данные
+  deactivate Storage
+  ImageProc -> ImageProc : Поворот
+  ImageProc --> Storage : Сохранить результат
+  activate Storage
+  Storage --> ImageProc : OK
+  deactivate Storage
+  ImageProc --> UI : {result_id: "rotated_f123"}
+  deactivate ImageProc
+
+  UI -> Session : Обновить current_file_id
+  Session --> UI : OK
+  UI --> User : Поворот выполнен. Перейти на "Бинаризацию"
+  deactivate UI
+end
+
+' === Шаг 4: Страница 3 — Бинаризация с проверкой загрузки ===
+User -> UI : [Страница: Бинаризация] Нажать "Бинаризовать"
+activate UI
+
+UI -> Session : Получить current_file_id
+Session --> UI : current_file_id = null
+
+alt Файл не загружен
+  UI -->x User : Ошибка: нет данных для обработки.\nЗагрузите файл и выполните поворот.
+  deactivate UI
+else Файл загружен
+  UI -> ImageProc : POST /analyze {tool: "binary_processing", ...}
+  activate ImageProc
+  ImageProc -> Storage : Получить файл
+  activate Storage
+  Storage --> ImageProc : Данные
+  deactivate Storage
+  ImageProc -> ImageProc : Бинаризация
+  ImageProc --> Storage : Сохранить результат
+  activate Storage
+  Storage --> ImageProc : OK
+  deactivate Storage
+  ImageProc --> UI : {final_result: "binary_result"}
+  deactivate ImageProc
+
+  UI --> User : Результат готов
+  deactivate UI
+end
+
+note right of ImageProc
+  Инструменты:
+  - image_rotation
+  - binary_processing
+end note
+
+@enduml
