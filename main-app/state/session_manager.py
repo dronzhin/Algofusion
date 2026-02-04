@@ -6,6 +6,7 @@ from typing import Any, Optional, Dict, List
 # Создаём логгер для этого модуля
 logger = logging.getLogger(f"app.{__name__}")
 
+
 class SessionManager:
     """
     Централизованный менеджер для работы с session_state
@@ -16,6 +17,7 @@ class SessionManager:
     SHARED_FILE = "shared_file"
     BINARY_RESULTS = "binary_results"
     ROTATION_RESULTS = "rotation_results"
+    OCR_RESULTS = "ocr_results"  # ← НОВЫЙ КЛЮЧ ДЛЯ РЕЗУЛЬТАТОВ РАСПОЗНАВАНИЯ
     LAST_UPLOADED_FILE = "last_uploaded_file"
     SHOW_LINE_STATE = "show_line_state"
     SESSION_INITIALIZED = "_session_initialized"
@@ -24,7 +26,7 @@ class SessionManager:
     def get_shared_file(cls) -> Optional[Dict[str, Any]]:
         """Получить текущий файл из сессии"""
         file = st.session_state.get(cls.SHARED_FILE)
-        logger.debug(f"Получен файл из сессии: {'да' if file else 'нет'}")
+        logger.debug(f"Получен файл из сессии: {'да' если файл иначе 'нет'}")
         return file
 
     @classmethod
@@ -57,18 +59,31 @@ class SessionManager:
     def get_binary_results(cls) -> Optional[Dict[str, Any]]:
         """Получить результаты бинарной конвертации"""
         results = st.session_state.get(cls.BINARY_RESULTS)
-        logger.debug(f"Получены бинарные результаты: {'да' if results else 'нет'}")
+        logger.debug(f"Получены бинарные результаты: {'да' если результаты иначе 'нет'}")
         return results
 
     @classmethod
-    def set_binary_results(cls, images: List[bytes], threshold: int, filename: str):
-        """Сохранить результаты бинарной конвертации"""
+    def set_binary_results(cls, images: List[bytes], threshold: int, original_filename: str,
+                           original_page_num: int = 0):
+        """
+        Сохранить результаты бинарной конвертации
+
+        Args:
+            images: список байтов бинарных изображений (обычно одно для одной страницы)
+            threshold: использованный порог бинаризации
+            original_filename: имя исходного файла
+            original_page_num: номер исходной страницы (0-indexed, для многостраничных документов)
+        """
         st.session_state[cls.BINARY_RESULTS] = {
             "images": images,
             "threshold": threshold,
-            "filename": filename
+            "original_filename": original_filename,
+            "original_page_num": original_page_num
         }
-        logger.info(f"Бинарные результаты сохранены: файл={filename}, порог={threshold}, изображений={len(images)}")
+        logger.info(
+            f"Бинарные результаты сохранены: файл={original_filename}, "
+            f"порог={threshold}, изображений={len(images)}, страница={original_page_num}"
+        )
 
     @classmethod
     def clear_binary_results(cls):
@@ -83,14 +98,14 @@ class SessionManager:
     def get_rotation_results(cls) -> Optional[Dict[str, Any]]:
         """Получить результаты выравнивания изображения"""
         results = st.session_state.get(cls.ROTATION_RESULTS)
-        logger.debug(f"Получены результаты выравнивания: {'да' if results else 'нет'}")
+        logger.debug(f"Получены результаты выравнивания: {'да' если результаты иначе 'нет'}")
         return results
 
     @classmethod
     def set_rotation_results(cls, results: Dict[str, Any]):
         """Сохранить результаты выравнивания изображения"""
         st.session_state[cls.ROTATION_RESULTS] = results
-        angle = results.get("angle", "неизвестно")
+        angle = results.get("rotation_angle", results.get("angle", "неизвестно"))
         logger.info(f"Результаты выравнивания сохранены: угол={angle}°")
 
     @classmethod
@@ -101,6 +116,73 @@ class SessionManager:
             logger.info("Результаты выравнивания удалены из сессии")
         else:
             logger.debug("Попытка очистки результатов выравнивания: данные отсутствуют")
+
+    # ==================== МЕТОДЫ ДЛЯ РАБОТЫ С РЕЗУЛЬТАТАМИ РАСПОЗНАВАНИЯ ТЕКСТА ====================
+
+    @classmethod
+    def get_ocr_results(cls) -> Optional[Dict[str, Any]]:
+        """
+        Получить результаты распознавания текста (OCR)
+
+        Returns:
+            Словарь с результатами распознавания или None, если результаты отсутствуют
+
+        Пример результата:
+            {
+                "model": "glm-ocr",
+                "prompt": "Extract all text",
+                "file_type": "pdf",
+                "total_pages": 3,
+                "pages": [...],
+                "combined_text": "...",
+                "confidence": 0.87,
+                "confidence_per_page": [0.92, 0.78, 0.85],
+                "status": "success",
+                "timing": {...},
+                "request_id": "req_12345"
+            }
+        """
+        results = st.session_state.get(cls.OCR_RESULTS)
+        logger.debug(f"Получены результаты распознавания: {'да' если результаты иначе 'нет'}")
+        return results
+
+    @classmethod
+    def set_ocr_results(cls, results: Dict[str, Any]):
+        """
+        Сохранить результаты распознавания текста (OCR)
+
+        Args:
+            results: словарь с результатами от сервера распознавания
+
+        Пример структуры результатов см. в описании get_ocr_results()
+        """
+        st.session_state[cls.OCR_RESULTS] = results
+
+        # Логирование ключевой информации
+        model = results.get("model", "неизвестно")
+        file_type = results.get("file_type", "неизвестно")
+        status = results.get("status", "неизвестно")
+        confidence = results.get("confidence")
+        pages = results.get("total_pages", 1) if file_type == "pdf" else 1
+
+        log_msg = f"Результаты распознавания сохранены: модель={model}, тип={file_type}, статус={status}"
+        if confidence is not None:
+            log_msg += f", уверенность={confidence:.2f}"
+        if file_type == "pdf":
+            log_msg += f", страниц={pages}"
+
+        logger.info(log_msg)
+
+    @classmethod
+    def clear_ocr_results(cls):
+        """Очистить результаты распознавания текста (OCR)"""
+        if cls.OCR_RESULTS in st.session_state:
+            del st.session_state[cls.OCR_RESULTS]
+            logger.info("Результаты распознавания удалены из сессии")
+        else:
+            logger.debug("Попытка очистки результатов распознавания: данные отсутствуют")
+
+    # ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
 
     @classmethod
     def get_show_line_state(cls) -> bool:
@@ -115,7 +197,8 @@ class SessionManager:
         st.session_state[cls.SHOW_LINE_STATE] = value
         logger.info(f"Состояние 'показать линию' установлено: {value}")
 
-    # === ИНИЦИАЛИЗАЦИЯ ===
+    # ==================== ИНИЦИАЛИЗАЦИЯ И ОЧИСТКА ====================
+
     @classmethod
     def initialize_session(cls):
         """Инициализация session_state — только один раз за сессию"""
@@ -126,6 +209,7 @@ class SessionManager:
             cls.SHARED_FILE: None,
             cls.BINARY_RESULTS: None,
             cls.ROTATION_RESULTS: None,
+            cls.OCR_RESULTS: None,  # ← ДОБАВЛЕНО
             cls.LAST_UPLOADED_FILE: None,
             cls.SHOW_LINE_STATE: False
         }
@@ -135,42 +219,18 @@ class SessionManager:
                 st.session_state[key] = default_value
                 logger.debug(f"Установлено значение по умолчанию для '{key}': {default_value}")
 
-        # Устанавливаем флаг
+        # Устанавливаем флаг инициализации
         st.session_state[cls.SESSION_INITIALIZED] = True
+        logger.info("Сессия инициализирована")
 
     @classmethod
     def clear_all_results(cls):
-        """Очистить все результаты обработки"""
+        """
+        Очистить ВСЕ результаты обработки (бинаризация, выравнивание, распознавание)
+        Не очищает сам файл — только результаты его обработки
+        """
         logger.info("Очистка всех результатов обработки")
         cls.clear_binary_results()
         cls.clear_rotation_results()
+        cls.clear_ocr_results()  # ← ДОБАВЛЕНО
         cls.set_show_line_state(False)
-
-    @staticmethod
-    def set_binary_results(images: list, threshold: int, original_filename: str, original_page_num: int = 0):
-        """
-        Сохраняет результаты бинаризации.
-
-        Args:
-            images (list): Список байтов бинарных изображений (обычно одно для одной страницы).
-            threshold (int): Использованный порог.
-            original_filename (str): Имя исходного файла.
-            original_page_num (int): Номер исходной страницы (0-indexed).
-        """
-        st.session_state.binary_results = {
-            "images": images,
-            "threshold": threshold,
-            "original_filename": original_filename,
-            "original_page_num": original_page_num  # Новое поле
-        }
-
-    @staticmethod
-    def get_binary_results():
-        """Возвращает результаты бинаризации."""
-        return st.session_state.get("binary_results")
-
-    @staticmethod
-    def clear_binary_results():
-        """Очищает результаты бинаризации."""
-        if "binary_results" in st.session_state:
-            del st.session_state["binary_results"]
