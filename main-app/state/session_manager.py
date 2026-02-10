@@ -26,7 +26,7 @@ class SessionManager:
     def get_shared_file(cls) -> Optional[Dict[str, Any]]:
         """Получить текущий файл из сессии"""
         file = st.session_state.get(cls.SHARED_FILE)
-        logger.debug(f"Получен файл из сессии: {'да' если файл иначе 'нет'}")
+        logger.debug(f"Получен файл из сессии: {'да' if file else 'нет'}")
         return file
 
     @classmethod
@@ -59,7 +59,7 @@ class SessionManager:
     def get_binary_results(cls) -> Optional[Dict[str, Any]]:
         """Получить результаты бинарной конвертации"""
         results = st.session_state.get(cls.BINARY_RESULTS)
-        logger.debug(f"Получены бинарные результаты: {'да' если результаты иначе 'нет'}")
+        logger.debug(f"Получены бинарные результаты: {'да' if results else 'нет'}")
         return results
 
     @classmethod
@@ -98,7 +98,7 @@ class SessionManager:
     def get_rotation_results(cls) -> Optional[Dict[str, Any]]:
         """Получить результаты выравнивания изображения"""
         results = st.session_state.get(cls.ROTATION_RESULTS)
-        logger.debug(f"Получены результаты выравнивания: {'да' если результаты иначе 'нет'}")
+        logger.debug(f"Получены результаты выравнивания: {'да' if results else 'нет'}")
         return results
 
     @classmethod
@@ -143,7 +143,7 @@ class SessionManager:
             }
         """
         results = st.session_state.get(cls.OCR_RESULTS)
-        logger.debug(f"Получены результаты распознавания: {'да' если результаты иначе 'нет'}")
+        logger.debug(f"Получены результаты распознавания: {'да' if results else 'нет'}")
         return results
 
     @classmethod

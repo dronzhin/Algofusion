@@ -1,17 +1,9 @@
-# models/glm_ocr.py
-
-"""
-GLM-OCR 0.9B модель для распознавания текста с изображений
-Лёгкая и быстрая модель на базе архитектуры GLM-4V
-"""
-
 from transformers import AutoProcessor, AutoModelForImageTextToText
 import torch
 from PIL import Image
 import warnings
 from utils import logger
 import time
-from typing import Tuple, Optional
 
 
 class GLMOCRModel:
@@ -44,17 +36,17 @@ class GLMOCRModel:
             logger.debug(f"   Параметры модели: {sum(p.numel() for p in self.model.parameters()) / 1e9:.1f}B")
 
         except ImportError as e:
-            if "AutoModelForImageTextToText" in str(e):
+            if "accelerate" in str(e):
                 logger.error(
-                    "❌ Требуется transformers >= 4.46.0 или установка из main:\n"
-                    "   pip install git+https://github.com/huggingface/transformers.git"
+                    "❌ Требуется библиотека 'accelerate' для работы с device_map.\n"
+                    "   Установите: pip install accelerate"
                 )
             raise
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки GLM-OCR: {str(e)}", exc_info=True)
             raise
 
-    def infer(self, image: Image.Image, prompt: str = "Text Recognition:", return_confidence: bool = False) -> Tuple[str, Optional[float]]:
+    def infer(self, image: Image.Image, prompt: str = "Text Recognition:", return_confidence: bool = False) -> tuple:
         """
         Распознавание текста с изображения
 
@@ -72,33 +64,38 @@ class GLMOCRModel:
             logger.debug(f"📝 GLM-OCR инференс | Промпт: {prompt[:50]}...")
             logger.debug(f"   Размер изображения: {image.size} | Формат: {image.mode}")
 
-            # Формирование сообщения в формате чата
+            # Формирование сообщения в формате чата БЕЗ дублирования изображения
             messages = [{
                 "role": "user",
-                "content": [{"type": "image"}, {"type": "text", "text": prompt}]
+                "content": [
+                    {"type": "image"},  # ← Только тип, без данных изображения
+                    {"type": "text", "text": prompt}
+                ]
             }]
 
-            # Применение шаблона чата + токенизация
+            # Правильная передача изображения ТОЛЬКО через параметр images
             inputs = self.processor.apply_chat_template(
                 messages,
                 tokenize=True,
                 add_generation_prompt=True,
                 return_dict=True,
                 return_tensors="pt",
-                images=image
+                images=image  # ← ЕДИНСТВЕННОЕ место передачи изображения
             ).to(self.model.device)
 
             # Убираем ненужные поля
             inputs.pop("token_type_ids", None)
 
-            # Генерация с опциональным возвратом логитов
+            # Генерация
             with torch.no_grad():
                 if return_confidence:
                     output = self.model.generate(
                         **inputs,
                         max_new_tokens=2048,
                         output_scores=True,
-                        return_dict_in_generate=True
+                        return_dict_in_generate=True,
+                        do_sample=False,
+                        temperature=0.0
                     )
                     generated_ids = output.sequences[0]
                     scores = output.scores
@@ -118,10 +115,11 @@ class GLMOCRModel:
             )
 
             result = output_text.strip()
+            infer_time = time.time() - start_time
 
             # Расчёт уверенности
             confidence = None
-            if return_confidence:
+            if return_confidence and scores is not None:
                 from utils import confidence_calculator
                 token_conf, _ = confidence_calculator.calculate_from_logits(
                     generated_ids,
@@ -132,17 +130,25 @@ class GLMOCRModel:
                 confidence = confidence_calculator.combine_confidences(
                     token_conf,
                     heuristic_conf,
-                    has_token_scores=(scores is not None)
+                    has_token_scores=True
                 )
-                logger.debug(f"   Уверенность: токенная={token_conf:.2f}, эвристическая={heuristic_conf:.2f}, итоговая={confidence:.2f}")
+                logger.debug(
+                    f"   Уверенность: токенная={token_conf:.2f}, эвристическая={heuristic_conf:.2f}, итоговая={confidence:.2f}")
 
-            infer_time = time.time() - start_time
             logger.info(f"✅ GLM-OCR завершена | Время: {infer_time:.2f} сек" +
-                       (f" | Уверенность: {confidence:.2f}" if confidence else ""))
+                        (f" | Уверенность: {confidence:.2f}" if confidence else ""))
             logger.debug(f"   Результат (первые 100 символов): {result[:100]}...")
 
             return result, confidence
 
+        except TypeError as e:
+            if "multiple values for keyword argument 'images'" in str(e):
+                logger.error(
+                    "❌ Ошибка: дублирование аргумента 'images' в apply_chat_template.\n"
+                    "   Убедитесь, что изображение передаётся ТОЛЬКО через параметр 'images',\n"
+                    "   а в messages.content используется только {'type': 'image'} без данных."
+                )
+            raise
         except Exception as e:
             logger.error(f"❌ Ошибка инференса GLM-OCR: {str(e)}", exc_info=True)
             raise

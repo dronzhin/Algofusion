@@ -1,6 +1,4 @@
-# app
-
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Unified OCR Server — локальный запуск без Docker
 Поддерживаемые модели: deepseek-ocr, deepseek-ocr2, paddleocr-vl-1.5, glm-ocr
@@ -17,9 +15,9 @@ import torch
 import sys
 import os
 import time
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
-# Импорт логгера и утилит
+# Импорт логгера (автоматическая инициализация происходит в utils/__init__.py)
 from utils import logger, PDFHandler, confidence_calculator
 
 # Добавляем текущую директорию в PATH
@@ -50,8 +48,8 @@ async def lifespan(app: FastAPI):
     logger.info("\n📋 Доступные модели:")
     logger.info("  • deepseek-ocr      (1.3B) — базовый OCR")
     logger.info("  • deepseek-ocr2     (3B)   — таблицы + структура")
-    logger.info("  • paddleocr-vl-1.5  (0.9B) — многоязычный текст")
-    logger.info("  • glm-ocr           (0.9B) — быстрый чистый OCR")
+    logger.info("  • paddleocr-vl-1.5  (0.9B) — многоязычный текст (требует дополнительных зависимостей)")
+    logger.info("  • glm-ocr           (0.9B) — быстрый чистый OCR (требует accelerate)")
 
     logger.info("\n🌐 API эндпоинты:")
     logger.info("  GET  /              — информация о сервере")
@@ -141,18 +139,40 @@ def process_single_image_with_confidence(
         load_start = time.time()
 
         try:
+            # === ЛОКАЛЬНЫЕ ИМПОРТЫ ДЛЯ ИЗОЛЯЦИИ ЗАВИСИМОСТЕЙ ===
             if model_name == "deepseek-ocr":
-                from models import DeepSeekOCRModel
+                from models.deepseek_ocr import DeepSeekOCRModel
                 models[model_name] = DeepSeekOCRModel()
             elif model_name == "deepseek-ocr2":
-                from models import DeepSeekOCR2Model
+                from models.deepseek_ocr2 import DeepSeekOCR2Model
                 models[model_name] = DeepSeekOCR2Model()
             elif model_name == "paddleocr-vl-1.5":
-                from models import PaddleOCRVLModel
-                models[model_name] = PaddleOCRVLModel()
+                # Явный импорт только при необходимости
+                try:
+                    from models.paddleocr_vl import PaddleOCRVLModel
+                    models[model_name] = PaddleOCRVLModel()
+                except ImportError as e:
+                    error_msg = str(e)
+                    if "paddlenlp" in error_msg.lower() or "aistudio_sdk" in error_msg.lower():
+                        raise RuntimeError(
+                            "Модель 'paddleocr-vl-1.5' недоступна: проблема с зависимостями paddlepaddle/paddlenlp.\n"
+                            "Рекомендуется использовать другие модели (glm-ocr, deepseek-ocr).\n"
+                            "Для исправления попробуйте: pip uninstall aistudio-sdk -y && pip install --upgrade paddlenlp"
+                        )
+                    raise
             elif model_name == "glm-ocr":
-                from models import GLMOCRModel
+                # Проверка наличия accelerate перед загрузкой
+                try:
+                    import accelerate
+                except ImportError:
+                    raise RuntimeError(
+                        "Модель 'glm-ocr' требует библиотеку 'accelerate'.\n"
+                        "Установите её командой: pip install accelerate"
+                    )
+                from models.glm_ocr import GLMOCRModel
                 models[model_name] = GLMOCRModel()
+            else:
+                raise ValueError(f"Неизвестная модель: {model_name}")
 
             load_time = time.time() - load_start
             model_load_times[model_name] = load_time
@@ -162,10 +182,26 @@ def process_single_image_with_confidence(
             error_msg = str(e)
             logger.error(f"❌ Ошибка загрузки модели '{model_name}': {error_msg}", exc_info=True)
 
+            # Уточнение ошибок
             if "404 Client Error" in error_msg and "deepseek-ocr2" in model_name:
-                error_msg = "DeepSeek-OCR 2 ещё не опубликована на Hugging Face."
-            elif "trust_remote_code" in error_msg:
-                error_msg = "Требуется явно разрешить trust_remote_code=True при загрузке модели"
+                error_msg = "DeepSeek-OCR 2 может быть недоступна на Hugging Face. Попробуйте другие модели."
+            elif "aistudio_sdk" in error_msg.lower():
+                error_msg = (
+                    "Ошибка в зависимостях paddlepaddle/paddlenlp (aistudio_sdk).\n"
+                    "Рекомендуется использовать другие модели (glm-ocr, deepseek-ocr).\n"
+                    "Для исправления: pip uninstall aistudio-sdk -y && pip install --upgrade paddlenlp"
+                )
+            elif "paddlenlp" in error_msg.lower():
+                error_msg = (
+                    "Зависимости paddlepaddle/paddlenlp не установлены или повреждены.\n"
+                    "Рекомендуется использовать другие модели (glm-ocr, deepseek-ocr).\n"
+                    "Для исправления: pip install paddlepaddle-gpu==2.6.1 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html && pip install paddlenlp==2.7.1"
+                )
+            elif "accelerate" in error_msg.lower():
+                error_msg = (
+                    "Библиотека 'accelerate' не установлена. Требуется для модели glm-ocr.\n"
+                    "Установите её: pip install accelerate"
+                )
 
             raise RuntimeError(f"Ошибка загрузки модели {model_name}: {error_msg}")
 
@@ -307,11 +343,12 @@ async def ocr_inference(
                         (f" | Уверенность: {confidence:.2f}" if confidence else ""))
 
                 except Exception as e:
-                    logger.error(f"[{request_id}] ❌ Ошибка обработки страницы {page_num}: {str(e)}", exc_info=True)
+                    error_msg = str(e)
+                    logger.error(f"[{request_id}] ❌ Ошибка обработки страницы {page_num}: {error_msg}", exc_info=True)
                     # Продолжаем обработку остальных страниц
                     results.append({
                         "page_number": page_num,
-                        "error": str(e),
+                        "error": error_msg,
                         "text": None,
                         "confidence": None,
                         "timing_seconds": round(time.time() - page_start, 2)
@@ -387,8 +424,16 @@ async def ocr_inference(
             }
 
     except Exception as e:
-        logger.error(f"[{request_id}] ❌ Ошибка обработки: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"[{request_id}] ❌ Ошибка обработки: {error_msg}", exc_info=True)
+
+        # Обработка специфических ошибок для лучшего пользовательского опыта
+        if "Ошибка загрузки модели" in error_msg:
+            detail_msg = error_msg
+        else:
+            detail_msg = f"Ошибка обработки запроса: {error_msg}"
+
+        raise HTTPException(status_code=500, detail=detail_msg)
 
 
 if __name__ == "__main__":

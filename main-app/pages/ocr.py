@@ -6,10 +6,9 @@
 import streamlit as st
 from services.ocr_client import OCRClient
 from services.preprocessing_client import PreprocessingClient
-from components import OCRResultComponent
+from components import FilePreviewComponent, OCRResultComponent
 from components.error_handler import error_handler
 from state import SessionManager
-from config import Config
 from utils import get_file_icon
 
 
@@ -36,8 +35,8 @@ def render_page():
         _show_unsupported_file_error(shared_file)
         return
 
-    # Отображение информации о файле и превью (как на других страницах)
-    _show_file_info_and_preview(shared_file)
+    # # Отображение информации о файле и превью (как на других страницах)
+    # _show_file_info_and_preview(shared_file)
 
     # Получение списка моделей и выбор
     models_info = ocr_client.get_available_models()
@@ -97,7 +96,7 @@ def _show_file_info_and_preview(shared_file: dict):
 
     st.info(f"{icon} Работаем с {file_type}: **{shared_file['name']}**")
 
-    from components.FilePreviewComponent import FilePreviewComponent
+    # ПРАВИЛЬНЫЙ ВЫЗОВ КОМПОНЕНТА (без комментариев!)
     FilePreviewComponent.render(
         file_bytes=shared_file["bytes"],
         file_type=shared_file["type"],

@@ -7,6 +7,7 @@
 import streamlit as st
 from typing import Dict, Any
 from utils import get_file_icon
+from .file_preview import FilePreviewComponent  # ← ИСПРАВЛЕНО: правильное имя модуля
 
 
 def render_ocr_result(result: Dict[str, Any], original_filename: str):
@@ -51,7 +52,6 @@ def _render_original_document():
         st.info("Исходный файл недоступен")
         return
 
-    from .FilePreviewComponent import FilePreviewComponent
     FilePreviewComponent.render(
         file_bytes=shared_file["bytes"],
         file_type=shared_file["type"],
@@ -332,9 +332,12 @@ def show_model_selection(models_info: Dict[str, Any]) -> str:
     # Извлечение имени модели из выбранной опции
     selected_model = available[options.index(selected_idx)]
 
-    # Отображение подробной информации
+    # Отображение подробной информации — ИСПРАВЛЕНО: английские ключевые слова
     with st.expander("ℹ️ Подробнее о модели", expanded=False):
         info = model_info.get(selected_model, {})
+        # ИСПРАВЛЕНО: заменены "если"/"иначе" на "if"/"else"
+        status_text = "✅ Модель уже загружена в память" if selected_model in loaded else "⏳ Модель будет загружена при первом использовании (займёт 5-30 сек)"
+
         st.markdown(f"""
         **{info.get('name', selected_model)}**
 
@@ -343,7 +346,7 @@ def show_model_selection(models_info: Dict[str, Any]) -> str:
         **Рекомендуется для:**
         {info.get('use_case', 'Общее распознавание текста')}
 
-        {"✅ Модель уже загружена в память" if selected_model in loaded else "⏳ Модель будет загружена при первом использовании (займёт 5-30 сек)"}
+        {status_text}
         """)
 
     return selected_model

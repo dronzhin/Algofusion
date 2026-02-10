@@ -26,3 +26,5 @@ numpy==1.26.0
 einops==0.8.0
 paddlenlp==2.8.0
 requests==2.32.0
+
+accelerate>=0.34.0

@@ -10,6 +10,7 @@ from utils import get_file_icon
 # Создаём логгер для этого модуля
 logger = logging.getLogger(f"app.{__name__}")
 
+
 class FilePreviewComponent:
     """
     Компонент для предпросмотра файлов
@@ -18,12 +19,12 @@ class FilePreviewComponent:
 
     @staticmethod
     def render(file_bytes: bytes, file_type: str, file_name: str, file_ext: str,
-               title: str = "Предпросмотр файла", show_meta: bool = True): # Исправлено имя параметра
+               title: str = "Предпросмотр файла", show_meta: bool = True):
         """Основной метод рендеринга"""
         logger.debug(f"Начало рендеринга превью для файла: {file_name} ({file_type})")
         st.subheader(title)
 
-        if show_meta: # Используем исправленное имя
+        if show_meta:
             FilePreviewComponent._show_metadata(file_name, file_type, file_ext)
 
         try:
@@ -70,13 +71,23 @@ class FilePreviewComponent:
                 pdf_doc.close()
                 return
 
+            # ГЕНЕРАЦИЯ УНИКАЛЬНОГО КЛЮЧА ДЛЯ ВИДЖЕТА
+            # Используем счётчик в session_state для уникальности при множественном рендеринге
+            if 'widget_counter' not in st.session_state:
+                st.session_state.widget_counter = 0
+            widget_id = st.session_state.widget_counter
+            st.session_state.widget_counter += 1
+
+            # Уникальный ключ: префикс + имя файла + идентификатор рендеринга
+            widget_key = f"pdf_page_{file_name}_{widget_id}"
+
             page_num_input = st.number_input(
                 "Номер страницы",
                 min_value=1,
                 max_value=page_count,
                 value=1,
                 step=1,
-                key=f"pdf_page_{file_name}"
+                key=widget_key  # ← УНИКАЛЬНЫЙ КЛЮЧ
             )
             page_num = page_num_input - 1
 
@@ -84,7 +95,7 @@ class FilePreviewComponent:
             pix = page.get_pixmap(dpi=Config.DEFAULT_DPI)
             img_data = pix.tobytes("png")
             st.image(img_data, caption=f"Страница {page_num + 1} из {page_count}", width='stretch')
-            logger.debug(f"Отображена страница {page_num + 1} PDF")
+            logger.debug(f"Отображена страница {page_num + 1} PDF (ключ: {widget_key})")
 
             pdf_doc.close()
         except Exception as e:
@@ -105,13 +116,21 @@ class FilePreviewComponent:
             PARAGRAPHS_PER_PAGE = 30
             total_pages = (len(paragraphs) + PARAGRAPHS_PER_PAGE - 1) // PARAGRAPHS_PER_PAGE
 
+            # ГЕНЕРАЦИЯ УНИКАЛЬНОГО КЛЮЧА ДЛЯ ВИДЖЕТА
+            if 'widget_counter' not in st.session_state:
+                st.session_state.widget_counter = 0
+            widget_id = st.session_state.widget_counter
+            st.session_state.widget_counter += 1
+
+            widget_key = f"docx_page_{file_name}_{widget_id}"
+
             page_num_input = st.number_input(
                 "Страница (по параграфам)",
                 min_value=1,
                 max_value=total_pages,
                 value=1,
                 step=1,
-                key=f"docx_page_{file_name}"
+                key=widget_key  # ← УНИКАЛЬНЫЙ КЛЮЧ
             )
 
             start_idx = (page_num_input - 1) * PARAGRAPHS_PER_PAGE
@@ -123,7 +142,7 @@ class FilePreviewComponent:
                 st.markdown(f"{para}")
 
             st.caption(f"Параграфы {start_idx + 1}–{min(end_idx, len(paragraphs))} из {len(paragraphs)}")
-            logger.debug(f"Отображена страница {page_num_input} DOCX")
+            logger.debug(f"Отображена страница {page_num_input} DOCX (ключ: {widget_key})")
         except Exception as e:
             logger.error(f"Ошибка при чтении DOCX '{file_name}': {e}", exc_info=True)
             st.error(f"Ошибка при чтении DOCX: {e}")
@@ -190,18 +209,19 @@ class FilePreviewComponent:
                 st.info("📄 PDF содержит одну страницу.")
                 return 0  # Всегда 0 для одиночной страницы
 
-            # Используем уникальный ключ для session_state
+            # Используем уникальный ключ для session_state (уже содержит префикс)
             page_selector_key = f"{key_prefix}_pdf_page_selector"
 
             # Устанавливаем начальное значение в session_state, если его нет
             if page_selector_key not in st.session_state:
-                st.session_state[page_selector_key] = 1 # Установим в 1-indexed значение по умолчанию
+                st.session_state[page_selector_key] = 1  # 1-indexed значение по умолчанию
 
             # Нормализуем значение в session_state, если оно выходит за границы
             current_value = st.session_state[page_selector_key]
             if not (1 <= current_value <= page_count):
                 st.session_state[page_selector_key] = 1
-                logger.warning(f"Значение session_state {page_selector_key} ({current_value}) вне диапазона [1, {page_count}], сброшено на 1.")
+                logger.warning(
+                    f"Значение session_state {page_selector_key} ({current_value}) вне диапазона [1, {page_count}], сброшено на 1.")
 
             current_selected_1_indexed = st.session_state[page_selector_key]
             selected_page_num_0_indexed = current_selected_1_indexed - 1
@@ -213,4 +233,4 @@ class FilePreviewComponent:
         except Exception as e:
             logger.error(f"Ошибка при обработке PDF '{shared_file['name']}': {e}", exc_info=True)
             st.error(f"❌ Ошибка при чтении PDF документа: {e}")
-            return 0 # Возвращаем 0 в случае ошибки
+            return 0  # Возвращаем 0 в случае ошибки

@@ -4,6 +4,13 @@ from .settings_panel import SettingsPanel
 from .ui_helpers import show_unsupported_file_error, show_download_button, select_page_number_ui
 from .error_handler import error_handler
 from .image_comparison import ImageComparisonComponent
+from .OCRResultComponent import render_ocr_result, show_server_unavailable, show_model_selection  # ← ДОБАВЛЕНО
+
+# Создаём класс-обёртку для удобного импорта
+class OCRResultComponent:
+    render_ocr_result = staticmethod(render_ocr_result)
+    show_server_unavailable = staticmethod(show_server_unavailable)
+    show_model_selection = staticmethod(show_model_selection)
 
 # Определяем функции-обертки ДО __all__
 def handle_api_error(error: Exception, operation_name: str = "операция"):
@@ -32,7 +39,7 @@ __all__ = [
     "ImageComparisonComponent",
     "show_download_button",
     "select_page_number_ui",
-
+    "OCRResultComponent",  # ← ДОБАВЛЕНО
     # error handlers (функции-обертки)
     "handle_api_error",
     "handle_file_error",
