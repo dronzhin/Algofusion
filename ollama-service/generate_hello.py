@@ -236,7 +236,7 @@ if __name__ == "__main__":
     results = []
     results.append(test_ocr_cycle("привет", "glm-ocr:latest"))
     results.append(test_ocr_cycle("Hello", "glm-ocr:latest"))
-    results.append(test_ocr_cycle("Hello", "deepseek-ocr:latest"))
+    results.append(test_ocr_cycle("12345", "deepseek-ocr:latest"))
 
     # Итоги
     print("\n" + "=" * 70)

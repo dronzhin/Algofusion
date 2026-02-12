@@ -42,6 +42,20 @@ class Config:
     # Настройки сессии
     SESSION_TIMEOUT_MINUTES = 30
 
+    # === Настройки Ollama ===
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:8003")
+    OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "120"))  # OCR может быть долгим
+    OLLAMA_MODEL_NAME = os.getenv("OLLAMA_OCR_MODEL", "glm-ocr:latest")
+
+    @classmethod
+    def get_ollama_config(cls) -> Dict[str, Any]:
+        """Конфигурация для Ollama клиента"""
+        return {
+            "base_url": cls.OLLAMA_BASE_URL,
+            "timeout": cls.OLLAMA_TIMEOUT,
+            "model_name": cls.OLLAMA_MODEL_NAME
+        }
+
     @classmethod
     def get_rotation_default_params(cls) -> Dict[str, Any]:
         return {

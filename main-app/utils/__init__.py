@@ -26,7 +26,6 @@ __all__ = [
     "FileProcessingError",
     "ValidationError",
     "ImageProcessingError",  # Новое исключение
-    "error_handler",
 
     # file_utils
     "get_file_metadata",
