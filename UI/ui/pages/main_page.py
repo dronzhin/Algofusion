@@ -4,7 +4,7 @@
 """
 import streamlit as st
 from typing import Any, List, Dict
-from ui.utils.logger import setup_logger
+from utils import setup_logger
 from ui.components.log_viewer import render_log_viewer
 from ui.components.stats_panel import render_stats_panel
 from ui.components.filter_panel import render_filter_panel

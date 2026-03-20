@@ -2,7 +2,7 @@
 """
 Переиспользуемые UI-компоненты
 """
-from ui.utils.logger import setup_logger
+from utils import setup_logger
 
 logger = setup_logger("ui.components")
 

@@ -1,0 +1,20 @@
+# monitor/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка зависимостей
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копирование кода
+COPY shared/ ./shared/
+COPY core/ ./core/
+COPY monitor/ ./monitor/
+
+# Настройка окружения
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Запуск монитора
+CMD ["python", "monitor/file_monitor.py"]
