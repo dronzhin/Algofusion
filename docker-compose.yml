@@ -1,114 +1,15 @@
-# docker-compose.yml
-version: "3.9"
+# app.py
+from core.state import AppState
 
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    environment:
-      - REDIS_PORT=${REDIS_PORT:-6379}
-    networks:
-      - app-network
+def main():
+    state = AppState.get()
 
-  ui:
-    build: ./ui
-    container_name: ui
-    ports:
-      - "${UI_PORT:-8080}:${UI_PORT:-8080}"
-    environment:
-      - REDIS_URL=${REDIS_URL}
-      - SHARED_FILES_DIR=${SHARED_FILES_DIR}
-      - LOG_LEVEL=${UI_LOG_LEVEL}
-      - LOG_FORMAT=${UI_LOG_FORMAT}
-      - MAX_FILE_SIZE=${UI_MAX_FILE_SIZE}
-      - SECRET_KEY=${SECRET_KEY}
-    volumes:
-      - ${HOST_FILES_DIR}:${SHARED_FILES_DIR}
-    networks:
-      - app-network
-    depends_on:
-      - redis
+    if state.current_page == "main":
+        from ui.pages.main_page import render_main_page
+        render_main_page(state)
+    elif state.current_page == "edit":
+        from ui.pages.edit_page import render_edit_page
+        render_edit_page(state)
 
-  ocr-worker:
-    build: ./workers/ocr
-    container_name: ocr-worker
-    environment:
-      - REDIS_URL=${REDIS_URL}
-      - OCR_QUEUE=${OCR_QUEUE}
-      - SHARED_FILES_DIR=${SHARED_FILES_DIR}
-      - DEFAULT_OCR_ENGINE=${DEFAULT_OCR_ENGINE}
-      - DEFAULT_OCR_LANG=${DEFAULT_OCR_LANG}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - CONTAINER_ID=${HOSTNAME}
-    volumes:
-      - ${HOST_FILES_DIR}:${SHARED_FILES_DIR}
-    networks:
-      - app-network
-    depends_on:
-      - redis
-    deploy:
-      resources:
-        limits:
-          memory: ${OCR_MEMORY_LIMIT:-4G}
-          cpus: '${OCR_CPU_LIMIT:-2}'
-
-  preprocess-worker:
-    build: ./workers/preprocess
-    container_name: preprocess-worker
-    environment:
-      - REDIS_URL=${REDIS_URL}
-      - OCR_QUEUE=${PREPROCESS_QUEUE}
-      - SHARED_FILES_DIR=${SHARED_FILES_DIR}
-      - LOG_LEVEL=${LOG_LEVEL}
-    volumes:
-      - ${HOST_FILES_DIR}:${SHARED_FILES_DIR}
-    networks:
-      - app-network
-    depends_on:
-      - redis
-
-  llm-worker:
-    build: ./workers/llm
-    container_name: llm-worker
-    environment:
-      - REDIS_URL=${REDIS_URL}
-      - OCR_QUEUE=${LLM_QUEUE}
-      - SHARED_FILES_DIR=${SHARED_FILES_DIR}
-      - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_API_URL=${LLM_API_URL}
-      - LLM_MODEL=${LLM_MODEL}
-      - LOG_LEVEL=${LOG_LEVEL}
-    volumes:
-      - ${HOST_FILES_DIR}:${SHARED_FILES_DIR}
-    networks:
-      - app-network
-    depends_on:
-      - redis
-
-  export-worker:
-    build: ./workers/export
-    container_name: export-worker
-    environment:
-      - REDIS_URL=${REDIS_URL}
-      - OCR_QUEUE=${EXPORT_QUEUE}
-      - SHARED_FILES_DIR=${SHARED_FILES_DIR}
-      - EXPORT_1C_ENABLED=${EXPORT_1C_ENABLED}
-      - EXPORT_1C_MODE=${EXPORT_1C_MODE}
-      - EXPORT_1C_ENDPOINT=${EXPORT_1C_ENDPOINT}
-      - EXPORT_1C_LOGIN=${EXPORT_1C_LOGIN}
-      - EXPORT_1C_PASSWORD=${EXPORT_1C_PASSWORD}
-      - LOG_LEVEL=${LOG_LEVEL}
-    volumes:
-      - ${HOST_FILES_DIR}:${SHARED_FILES_DIR}
-      - ./data/1c:/shared/1c/inbox
-    networks:
-      - app-network
-    depends_on:
-      - redis
-
-networks:
-  app-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: ${DOCKER_SUBNET:-172.20.0.0/16}
+if __name__ == "__main__":
+    main()
