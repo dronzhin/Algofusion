@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
+from datetime import datetime, timezone  # ← FIX: Добавили timezone
 from enum import Enum
 from pathlib import Path
 import json
@@ -84,8 +84,9 @@ class FileJob:
 
     retry_count: int = 0
     max_retries: int = 3
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    # ← FIX: timezone-aware datetime вместо устаревшего utcnow()
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     history: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
@@ -107,6 +108,11 @@ class FileJob:
             export_config_data = data.get("export_config", {})
             export_config = ExportConfig(**export_config_data) if export_config_data else ExportConfig()
 
+            # ← FIX: Парсинг datetime с поддержкой timezone
+            exported_at = None
+            if data.get("exported_at"):
+                exported_at = cls._parse_datetime(data["exported_at"])
+
             return cls(
                 file_id=data.get("file_id", "unknown"),
                 original_filename=data.get("original_filename", "unknown"),
@@ -122,7 +128,7 @@ class FileJob:
                 export_status=export_status,
                 export_attempts=data.get("export_attempts", 0),
                 export_error=data.get("export_error"),
-                exported_at=datetime.fromisoformat(data["exported_at"]) if data.get("exported_at") else None,
+                exported_at=exported_at,
                 document_1c_id=data.get("document_1c_id"),
                 config=data.get("config", {}),
                 priority=data.get("priority", 0),
@@ -261,21 +267,23 @@ class FileJob:
         """Завершить модуль."""
         self.completed_modules.add(module)
         self.current_module = None
-        self.updated_at = datetime.utcnow()
+        # ← FIX: timezone-aware datetime
+        self.updated_at = datetime.now(timezone.utc)
         logger.debug(f"Модуль {module} завершён для файла {self.file_id}")
 
     def add_to_history(self, action: str, module: str, success: bool,
                        error: str = None, duration: float = None):
         """Добавить запись в историю."""
+        # ← FIX: timezone-aware datetime
         self.history.append({
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "module": module,
             "action": action,
             "success": success,
             "error": error,
             "duration_seconds": duration
         })
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def is_complete(self) -> bool:
         """Проверить завершена ли обработка."""
@@ -291,5 +299,19 @@ class FileJob:
     def increment_retry(self):
         """Увеличить счётчик попыток."""
         self.retry_count += 1
-        self.updated_at = datetime.utcnow()
+        # ← FIX: timezone-aware datetime
+        self.updated_at = datetime.now(timezone.utc)
         logger.warning(f"Попытка {self.retry_count}/{self.max_retries} для файла {self.file_id}")
+
+    # ← НОВЫЙ МЕТОД: Утилита для парсинга datetime с поддержкой timezone
+    @staticmethod
+    def _parse_datetime(value: str) -> datetime:
+        """
+        Парсит ISO-строку в datetime, обеспечивая timezone-aware результат.
+        Если строка без таймзоны — добавляет UTC.
+        """
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            # Naive datetime считаем за UTC для консистентности
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
