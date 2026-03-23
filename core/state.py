@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone  # ← Добавили timezone
 from shared.utils.logger import setup_logger
 
 logger = setup_logger("core.state")
@@ -34,12 +34,15 @@ class AppState:
     redis_last_ping: Optional[datetime] = None
 
     # Системная информация
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    # ← Используем timezone-aware datetime
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     uptime_seconds: int = 0
 
     def update_uptime(self):
         """Обновляет время работы приложения."""
-        self.uptime_seconds = int((datetime.utcnow() - self.started_at).total_seconds())
+        # ← Используем timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        self.uptime_seconds = int((now - self.started_at).total_seconds())
 
     def to_dict(self) -> Dict[str, Any]:
         """Конвертация в словарь."""
@@ -52,7 +55,7 @@ class AppState:
             "last_stats_update": self.last_stats_update.isoformat() if self.last_stats_update else None,
             "redis_connected": self.redis_connected,
             "redis_last_ping": self.redis_last_ping.isoformat() if self.redis_last_ping else None,
-            "started_at": self.started_at.isoformat(),
+            "started_at": self.started_at.isoformat(),  # timezone-aware корректно сериализуется
             "uptime_seconds": self.uptime_seconds
         }
 

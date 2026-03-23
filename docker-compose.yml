@@ -2,147 +2,180 @@
 version: '3.8'
 
 services:
+  # ============================================================================
+  # REDIS - Брокер сообщений и кэш
+  # ============================================================================
   redis:
     image: redis:7-alpine
     container_name: algofusion-redis
     ports:
-      - "6379:6379"
+      - "6379:6379"  # ← Для отладки, в продакшене убрать
     volumes:
-      - redis_/data
+      - redis_data:/data
     networks:
       - app-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
+  # ============================================================================
+  # UI - Streamlit интерфейс
+  # ============================================================================
   ui:
     build:
-      context: .                    # ← Корень проекта
+      context: .
       dockerfile: ui/Dockerfile
     container_name: algofusion-ui
     ports:
       - "8501:8501"
     volumes:
+      # Только данные (код внутри образа)
       - ./shared/files:/shared/files
-      - ./src:/app/src              # ← Монтируем src/ для hot-reload
-      - ./ui:/app/ui                # ← Монтируем ui/ для hot-reload
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SHARED_FILES_PATH=/shared/files
+      - LOG_LEVEL=INFO
       - PYTHONPATH=/app
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
-  worker-preprocess:
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    container_name: algofusion-worker-preprocess
-    volumes:
-      - ./shared/files:/shared/files
-      - ./src:/app/src              # ← Видит src/
-      - ./workers:/app/workers      # ← Видит workers/
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - WORKER_TYPE=preprocess
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-    networks:
-      - app-network
-    command: ["python", "workers/preprocess_worker.py"]
-    restart: unless-stopped
-
-  worker-ocr:
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    container_name: algofusion-worker-ocr
-    volumes:
-      - ./shared/files:/shared/files
-      - ./src:/app/src
-      - ./workers:/app/workers
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - WORKER_TYPE=ocr
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-    networks:
-      - app-network
-    command: ["python", "workers/ocr_worker.py"]
-    restart: unless-stopped
-
-  worker-llm:
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    container_name: algofusion-worker-llm
-    volumes:
-      - ./shared/files:/shared/files
-      - ./src:/app/src
-      - ./workers:/app/workers
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - WORKER_TYPE=llm
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-    networks:
-      - app-network
-    command: ["python", "workers/llm_worker.py"]
-    restart: unless-stopped
-
-  worker-export:
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    container_name: algofusion-worker-export
-    volumes:
-      - ./shared/files:/shared/files
-      - ./src:/app/src
-      - ./workers:/app/workers
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - WORKER_TYPE=export
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-    networks:
-      - app-network
-    command: ["python", "workers/export_worker.py"]
-    restart: unless-stopped
-
+  # ============================================================================
+  # FILE MONITOR - Мониторинг внешней папки
+  # ============================================================================
   file-monitor:
     build:
       context: .
       dockerfile: monitor/Dockerfile
     container_name: algofusion-file-monitor
     volumes:
+      # Только данные (код внутри образа)
       - ./shared/files:/shared/files
-      - /host/external/incoming:/external/incoming
-      - ./src:/app/src
-      - ./core:/app/core
+      - /home/dmitry/incoming:/external/incoming  # ← Папка на хосте
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - SHARED_FILES_PATH=/shared/files
+      - EXTERNAL_MONITOR_PATH=/external/incoming
       - MONITOR_INTERVAL=30
-      - EXTERNAL_PATH=/external/incoming
+      - LOG_LEVEL=INFO
       - PYTHONPATH=/app
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped
 
-volumes:
-  redis_
+  # ============================================================================
+  # WORKERS - Заглушки (закомментировано для будущего расширения)
+  # ============================================================================
+  # worker-preprocess:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   container_name: algofusion-worker-preprocess
+  #   volumes:
+  #     - ./shared/files:/shared/files
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - WORKER_TYPE=preprocess
+  #     - LOG_LEVEL=INFO
+  #     - PYTHONPATH=/app
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - app-network
+  #   command: ["python", "workers/preprocess_worker.py"]
+  #   restart: unless-stopped
 
+  # worker-ocr:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   container_name: algofusion-worker-ocr
+  #   volumes:
+  #     - ./shared/files:/shared/files
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - WORKER_TYPE=ocr
+  #     - LOG_LEVEL=INFO
+  #     - PYTHONPATH=/app
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - app-network
+  #   command: ["python", "workers/ocr_worker.py"]
+  #   restart: unless-stopped
+
+  # worker-llm:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   container_name: algofusion-worker-llm
+  #   volumes:
+  #     - ./shared/files:/shared/files
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - WORKER_TYPE=llm
+  #     - LOG_LEVEL=INFO
+  #     - PYTHONPATH=/app
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - app-network
+  #   command: ["python", "workers/llm_worker.py"]
+  #   restart: unless-stopped
+
+  # worker-export:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   container_name: algofusion-worker-export
+  #   volumes:
+  #     - ./shared/files:/shared/files
+  #   environment:
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - WORKER_TYPE=export
+  #     - LOG_LEVEL=INFO
+  #     - PYTHONPATH=/app
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - app-network
+  #   command: ["python", "workers/export_worker.py"]
+  #   restart: unless-stopped
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  redis_data:
+    driver: local
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
 networks:
   app-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
