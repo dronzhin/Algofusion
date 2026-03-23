@@ -9,7 +9,7 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Set
-from shared.models.file import FileJob, FileType, FileStatus
+from shared.models.file import FileJob, FileStatus
 from shared.config.settings import get_settings
 from shared.utils.logger import setup_logger
 from shared.utils.helpers import safe_mkdir

@@ -4,7 +4,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Копируем зависимости
-COPY requirements.txt .
+COPY ui/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем весь код в образ

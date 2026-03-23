@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
-from datetime import datetime, timezone  # ← FIX: Добавили timezone
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 import json
@@ -84,7 +84,6 @@ class FileJob:
 
     retry_count: int = 0
     max_retries: int = 3
-    # ← FIX: timezone-aware datetime вместо устаревшего utcnow()
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     history: List[Dict[str, Any]] = field(default_factory=list)
@@ -267,7 +266,6 @@ class FileJob:
         """Завершить модуль."""
         self.completed_modules.add(module)
         self.current_module = None
-        # ← FIX: timezone-aware datetime
         self.updated_at = datetime.now(timezone.utc)
         logger.debug(f"Модуль {module} завершён для файла {self.file_id}")
 
@@ -299,11 +297,9 @@ class FileJob:
     def increment_retry(self):
         """Увеличить счётчик попыток."""
         self.retry_count += 1
-        # ← FIX: timezone-aware datetime
         self.updated_at = datetime.now(timezone.utc)
         logger.warning(f"Попытка {self.retry_count}/{self.max_retries} для файла {self.file_id}")
 
-    # ← НОВЫЙ МЕТОД: Утилита для парсинга datetime с поддержкой timezone
     @staticmethod
     def _parse_datetime(value: str) -> datetime:
         """
