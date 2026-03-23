@@ -1,3 +1,4 @@
+# core/services/redis_client.py
 """
 Redis клиент для очередей и Pub/Sub.
 Используется всеми контейнерами для коммуникации.
@@ -7,7 +8,7 @@ import redis
 import json
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from shared.utils.logger import setup_logger
 
 logger = setup_logger("core.services.redis_client")
@@ -39,7 +40,8 @@ class RedisClient:
                     port=self.port,
                     db=self.db,
                     decode_responses=True,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
+                    health_check_interval=30  # ← Авто-переподключение
                 )
                 # Проверка подключения
                 self._client.ping()
@@ -52,11 +54,11 @@ class RedisClient:
     def publish_event(self, channel: str, event: Dict[str, Any]) -> int:
         """Публикация события в канал."""
         try:
-            event["timestamp"] = datetime.utcnow().isoformat()
+            event["timestamp"] = datetime.now(timezone.utc).isoformat()
             payload = json.dumps(event, ensure_ascii=False)
-            result = self.client.publish(channel, payload)
+            result = self.client.publish(channel, self._ensure_str(payload))
             logger.debug(f"Опубликовано событие в {channel}: {event.get('type')}")
-            return result
+            return result  # type: ignore[no-any-return]
         except Exception as e:
             logger.error(f"Ошибка публикации события: {e}")
             return 0
@@ -66,7 +68,7 @@ class RedisClient:
         try:
             if priority > 0:
                 queue = f"priority:{priority}:{queue}"
-            result = self.client.lpush(queue, job_payload)
+            result = self.client.lpush(queue, self._ensure_str(job_payload))
             logger.debug(f"Добавлено в очередь {queue}")
             return result
         except Exception as e:
@@ -76,9 +78,13 @@ class RedisClient:
     def pop_from_queue(self, queue: str, timeout: int = 0) -> Optional[str]:
         """Получение задания из очереди (блокирующее)."""
         try:
-            result = self.client.brpop(queue, timeout=timeout)
+            if timeout > 0:
+                result = self.client.brpop(queue, timeout=timeout)
+            else:
+                result = self.client.rpop(queue)
             if result:
-                return result[1]
+                value = result[1] if isinstance(result, tuple) else result
+                return self._ensure_str(value)
             return None
         except Exception as e:
             logger.error(f"Ошибка получения из очереди {queue}: {e}")
@@ -88,7 +94,7 @@ class RedisClient:
         """Подписка на каналы."""
         try:
             if self._pubsub is None:
-                self._pubsub = self.client.pubsub()
+                self._pubsub = self.client.pubsub(ignore_subscribe_messages=True)
             self._pubsub.subscribe(*channels)
             logger.info(f"Подписка на каналы: {channels}")
             return self._pubsub
@@ -101,7 +107,9 @@ class RedisClient:
         try:
             key = f"file:{file_id}:status"
             data = self.client.get(key)
-            return json.loads(data) if data else None
+            if data is None:
+                return None
+            return json.loads(self._ensure_str(data))
         except Exception as e:
             logger.error(f"Ошибка получения статуса файла {file_id}: {e}")
             return None
@@ -110,7 +118,8 @@ class RedisClient:
         """Установка статуса файла в Redis."""
         try:
             key = f"file:{file_id}:status"
-            self.client.setex(key, ttl, json.dumps(status, ensure_ascii=False))
+            payload = json.dumps(status, ensure_ascii=False)
+            self.client.setex(key, ttl, self._ensure_str(payload))
             logger.debug(f"Статус файла {file_id} обновлён")
             return True
         except Exception as e:
@@ -121,10 +130,10 @@ class RedisClient:
         """Получение всех файлов из Redis."""
         try:
             files = []
-            for key in self.client.keys("file:*:status"):
+            for key in self.client.scan_iter("file:*:status"):
                 data = self.client.get(key)
                 if data:
-                    files.append(json.loads(data))
+                    files.append(json.loads(self._ensure_str(data)))
             return files
         except Exception as e:
             logger.error(f"Ошибка получения всех файлов: {e}")
@@ -148,6 +157,25 @@ class RedisClient:
         if self._client:
             self._client.close()
         logger.info("Соединения Redis закрыты")
+
+    @staticmethod
+    def _ensure_str(value: Any) -> str:
+        """
+        Гарантирует возврат строки из любого типа.
+        Решает проблему 'Expected str | bytes | bytearray, got Awaitable'.
+        """
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode("utf-8")
+        if hasattr(value, "__await__"):
+            # ← Критическая защита: если передали coroutine, это ошибка вызова
+            logger.error(f"Попытка передать Awaitable вместо значения: {type(value)}")
+            raise TypeError(
+                f"Expected str|bytes, got Awaitable. "
+                f"Проверьте, не используете ли вы async-метод без 'await': {value}"
+            )
+        return str(value)
 
 
 # Глобальный экземпляр (синглтон)

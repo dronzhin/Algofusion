@@ -8,8 +8,8 @@ import shutil
 import zipfile
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime
-from shared.models.file import FileJob, FileStatus
+from datetime import datetime, timezone  # ← Добавили timezone
+from shared.models.file import FileJob
 from shared.utils.logger import setup_logger
 from shared.utils.helpers import safe_mkdir
 
@@ -101,12 +101,16 @@ class FileService:
         """Очистка старых файлов."""
         try:
             cleaned = 0
-            now = datetime.utcnow()
+            # ← Используем timezone-aware datetime
+            now = datetime.now(timezone.utc)
 
             for file_dir in self.base_dir.iterdir():
                 if file_dir.is_dir() and file_dir.name != "archive":
-                    # Проверяем возраст по времени создания директории
-                    created = datetime.fromtimestamp(file_dir.stat().st_ctime)
+                    # Получаем время создания с таймзоной
+                    created = datetime.fromtimestamp(
+                        file_dir.stat().st_ctime,
+                        tz=timezone.utc  # ← Указываем таймзону явно
+                    )
                     age = (now - created).days
 
                     if age > max_age_days:
