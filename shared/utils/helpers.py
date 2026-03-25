@@ -31,13 +31,23 @@ def format_datetime(dt: Union[datetime, str], format_str: str = "%Y-%m-%d %H:%M"
     return dt.strftime(format_str)
 
 
-def safe_mkdir(path: Union[str, Path], mode: int = 0o755) -> Path:
-    """Безопасное создание директории."""
+def safe_mkdir(path: Union[str, Path], mode: int = 0o755) -> Path:  # ← 0o755 вместо 0o700
+    """Безопасное создание директории с правильными правами."""
     path = Path(path)
     try:
-        path.mkdir(parents=True, exist_ok=True, mode=mode)
-        logger.debug(f"Директория создана: {path}")
-        return path
+        # Устанавливаем umask перед созданием (влияет на права новых файлов/папок)
+        old_umask = os.umask(0o022)  # ← Разрешаем чтение для группы/остальных
+        try:
+            path.mkdir(parents=True, exist_ok=True, mode=mode)
+            # Явно устанавливаем права (на случай если umask не сработал)
+            os.chmod(path, mode)
+            logger.debug(f"Директория создана: {path} (права: {oct(mode)})")
+            return path
+        finally:
+            os.umask(old_umask)  # ← Восстанавливаем старый umask
+    except PermissionError as e:
+        logger.error(f"Ошибка прав доступа при создании {path}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Ошибка создания директории {path}: {e}")
         raise

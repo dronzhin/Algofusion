@@ -1,14 +1,20 @@
-# ui/state.py
+# ui/state.py (фрагмент с исправлениями)
 """
 Управление session_state для Streamlit UI.
 Инкапсулирует всю логику работы с состоянием сессии.
 """
 
 import streamlit as st
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
 from datetime import datetime, timedelta
 from shared.utils.logger import setup_logger
 from core.state import get_app_state
+
+# Для типизации без циклических импортов
+if TYPE_CHECKING:
+    from core.services.redis_client import RedisClient
+    from core.services.file_service import FileService
+    from shared.config.settings import Settings
 
 logger = setup_logger("ui.state")
 
@@ -46,6 +52,10 @@ class SessionState:
         logger.debug("SessionState инициализирован")
         return cls()
 
+    # ========================================================================
+    # СВОЙСТВА С ГЕТТЕРАМИ И СЕТТЕРАМИ
+    # ========================================================================
+
     @property
     def current_page(self) -> str:
         return st.session_state.current_page
@@ -64,6 +74,46 @@ class SessionState:
         st.session_state.editing_file_index = value
 
     @property
+    def redis_client(self) -> Optional["RedisClient"]:
+        return st.session_state.redis_client
+
+    @redis_client.setter  # ← ДОБАВЛЕНО: сеттер для redis_client
+    def redis_client(self, value: Optional["RedisClient"]):
+        st.session_state.redis_client = value
+        if value is not None:
+            logger.debug("Redis клиент установлен в сессию")
+
+    @property
+    def file_service(self) -> Optional["FileService"]:
+        return st.session_state.file_service
+
+    @file_service.setter  # ← ДОБАВЛЕНО: сеттер для file_service
+    def file_service(self, value: Optional["FileService"]):
+        st.session_state.file_service = value
+        if value is not None:
+            logger.debug("FileService установлен в сессию")
+
+    @property
+    def settings(self) -> Optional["Settings"]:
+        return st.session_state.settings
+
+    @settings.setter  # ← ДОБАВЛЕНО: сеттер для settings
+    def settings(self, value: Optional["Settings"]):
+        st.session_state.settings = value
+
+    @property
+    def pubsub(self):
+        return st.session_state.pubsub
+
+    @pubsub.setter  # ← ДОБАВЛЕНО: сеттер для pubsub
+    def pubsub(self, value):
+        st.session_state.pubsub = value
+
+    # ========================================================================
+    # СВОЙСТВА ТОЛЬКО ДЛЯ ЧТЕНИЯ (без сеттеров)
+    # ========================================================================
+
+    @property
     def export_logs(self) -> List[Dict[str, str]]:
         return st.session_state.export_logs
 
@@ -75,20 +125,16 @@ class SessionState:
     def last_refresh(self) -> Optional[datetime]:
         return st.session_state.last_refresh
 
-    @property
-    def redis_client(self):
-        return st.session_state.redis_client
-
-    @property
-    def file_service(self):
-        return st.session_state.file_service
+    # ========================================================================
+    # МЕТОДЫ
+    # ========================================================================
 
     def navigate(self, page: str, **kwargs):
         """Безопасная навигация между страницами."""
-        st.session_state.current_page = page
+        self.current_page = page  # Использует сеттер
         for key, value in kwargs.items():
             if key in self.KEYS:
-                st.session_state[key] = value
+                setattr(self, key, value)  # Использует сеттеры если есть
         logger.info(f"Навигация: {page}")
 
     def add_log(self, status: str, message: str):

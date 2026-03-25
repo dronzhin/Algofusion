@@ -5,7 +5,6 @@
 
 import streamlit as st
 from typing import Dict, Any
-import pandas as pd
 from shared.utils.logger import setup_logger
 
 logger = setup_logger("ui.components.stats_panel")

@@ -4,14 +4,12 @@
 """
 
 import streamlit as st
-from typing import Any, Dict
 from shared.utils.logger import setup_logger
 from ui.state import SessionState
 from ui.cache import get_files_from_redis_cached, get_file_stats_cached, CacheManager
 from ui.components.file_list import render_file_list
 from ui.components.stats_panel import render_stats_panel
 from ui.components.progress_tracker import render_progress_tracker
-from ui.components.log_viewer import render_log_viewer
 
 logger = setup_logger("ui.pages.main_page")
 

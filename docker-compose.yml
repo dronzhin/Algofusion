@@ -1,5 +1,4 @@
 # docker-compose.yml
-version: '3.8'
 
 services:
   # ============================================================================
@@ -33,8 +32,7 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Только данные (код внутри образа)
-      - ./shared/files:/shared/files
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -61,18 +59,24 @@ services:
       context: .
       dockerfile: monitor/Dockerfile
     container_name: algofusion-file-monitor
+
+    # ← Запуск от имени текущего пользователя хоста
+    user: "${UID:-1000}:${GID:-1000}"
+
     volumes:
-      # Только данные (код внутри образа)
-      - ./shared/files:/shared/files
-      - /home/dmitry/incoming:/external/incoming  # ← Папка на хосте
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+      - ${HOST_INCOMING_PATH:-/home/dmitry/incoming}:/external/incoming:rw
+
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SHARED_FILES_PATH=/shared/files
       - EXTERNAL_MONITOR_PATH=/external/incoming
-      - MONITOR_INTERVAL=30
       - LOG_LEVEL=INFO
       - PYTHONPATH=/app
+      - CONTAINER_UID=${UID:-1000}
+      - CONTAINER_GID=${GID:-1000}
+
     depends_on:
       redis:
         condition: service_healthy
