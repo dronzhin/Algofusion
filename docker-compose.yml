@@ -87,50 +87,51 @@ services:
   # ============================================================================
   # WORKERS - Заглушки (закомментировано для будущего расширения)
   # ============================================================================
-  # worker-preprocess:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-preprocess
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=preprocess
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/preprocess_worker.py"]
-  #   restart: unless-stopped
+#  worker-preprocess:
+#   build:
+#     context: .
+#     dockerfile: workers/preprocess/Dockerfile
+#   container_name: algofusion-worker-preprocess
+#   volumes:
+#     - ./shared/files:/shared/files
+#   environment:
+#     - REDIS_HOST=redis
+#     - REDIS_PORT=6379
+#     - WORKER_TYPE=preprocess
+#     - LOG_LEVEL=INFO
+#     - PYTHONPATH=/app
+#   depends_on:
+#     - redis
+#   networks:
+#     - app-network
+#   command: ["python", "workers/preprocess_worker.py"]
+#   restart: unless-stopped
 
-  # worker-ocr:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-ocr
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=ocr
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/ocr_worker.py"]
-  #   restart: unless-stopped
+  worker-ocr:
+   build:
+     context: .
+     dockerfile: workers/OCR/Dockerfile
+   container_name: algofusion-worker-ocr
+   volumes:
+     - ./shared/files:/shared/files
+   environment:
+     - REDIS_URL=redis://redis:6379/0
+     - REDIS_HOST=redis
+     - REDIS_PORT=6379
+     - WORKER_TYPE=ocr
+     - LOG_LEVEL=INFO
+     - PYTHONPATH=/app
+   depends_on:
+     - redis
+   networks:
+     - app-network
+   command: ["python", "-m", "workers/ocr_worker.py"]
+   restart: unless-stopped
 
   # worker-llm:
   #   build:
   #     context: .
-  #     dockerfile: workers/Dockerfile
+  #     dockerfile: workers/llm/Dockerfile
   #   container_name: algofusion-worker-llm
   #   volumes:
   #     - ./shared/files:/shared/files
@@ -150,7 +151,7 @@ services:
   # worker-export:
   #   build:
   #     context: .
-  #     dockerfile: workers/Dockerfile
+  #     dockerfile: workers/export/Dockerfile
   #   container_name: algofusion-worker-export
   #   volumes:
   #     - ./shared/files:/shared/files

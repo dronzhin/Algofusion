@@ -23,11 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # ==================== Python зависимости ====================
-COPY requirements.txt .
+COPY workers/OCR/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ==================== Исходный код ====================
-COPY src/ ./src/
+COPY workers/OCR/src/ ./src/
 
 # ==================== Пользователь (безопасность) ====================
 RUN useradd -m -u 1000 ocruser && chown -R ocruser:ocruser /app
