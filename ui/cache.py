@@ -1,4 +1,3 @@
-# ui/cache.py
 """
 Слой кэширования для Streamlit UI.
 Использует @st.cache_data и @st.cache_resource для оптимизации.
@@ -7,10 +6,14 @@
 import streamlit as st
 import hashlib
 import json
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, Union, TYPE_CHECKING
 from datetime import datetime, timedelta
 from functools import wraps
 from shared.utils.logger import setup_logger
+
+# Для типизации без циклических импортов
+if TYPE_CHECKING:
+    from core.services.redis_client import RedisClient
 
 logger = setup_logger("ui.cache")
 
@@ -31,28 +34,62 @@ def get_redis_client_cached():
 
 
 @st.cache_data(ttl=60)  # 60 секунд
-def get_files_from_redis_cached(redis_client, cache_key: str = "all") -> List[Dict[str, Any]]:
+def get_files_from_redis_cached(
+        _redis_client: Union['RedisClient', List[Dict[str, Any]]],
+        cache_key: str = "all"
+) -> List[Dict[str, Any]]:
     """
     Кэшированное получение списка файлов из Redis.
-    TTL 60 секунд для баланса между актуальностью и производительностью.
+
+    Args:
+        _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
+        cache_key: Ключ для дифференциации кэша
+
+    Returns:
+        List[Dict]: Список файлов из Redis
     """
     try:
-        files = redis_client.get_all_files()
-        logger.debug(f"Загружено {len(files)} файлов из Redis (кэш: {cache_key})")
-        return files
+        # ← Защитная проверка: если передали список — возвращаем его
+        if isinstance(_redis_client, list):
+            return _redis_client
+
+        # Если это клиент — получаем файлы
+        if hasattr(_redis_client, 'get_all_files'):
+            files = _redis_client.get_all_files()
+            logger.debug(f"Загружено {len(files)} файлов из Redis (кэш: {cache_key})")
+            return files
+        else:
+            logger.warning(f"Неожиданный тип _redis_client: {type(_redis_client)}")
+            return []
+
     except Exception as e:
         logger.error(f"Ошибка получения файлов: {e}")
         return []
 
 
 @st.cache_data(ttl=300)  # 5 минут
-def get_file_stats_cached(redis_client) -> Dict[str, Any]:
+def get_file_stats_cached(
+        _redis_client: Union['RedisClient', List[Dict[str, Any]]]
+) -> Dict[str, Any]:
     """
     Кэшированная статистика файлов.
-    Менее критично к актуальности, поэтому TTL больше.
+
+    Args:
+        _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
+
+    Returns:
+        Dict: Статистика файлов
     """
     try:
-        files = redis_client.get_all_files()
+        # ← Защитная проверка: если передали список — используем его
+        if isinstance(_redis_client, list):
+            files = _redis_client
+        elif hasattr(_redis_client, 'get_all_files'):
+            files = _redis_client.get_all_files()
+        else:
+            logger.warning(f"Неожиданный тип _redis_client: {type(_redis_client)}")
+            files = []
+
         total = len(files)
 
         statuses = [f.get("status", "unknown") for f in files]
@@ -73,17 +110,34 @@ def get_file_stats_cached(redis_client) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}")
-        return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0}
+        return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
 
 
 @st.cache_data(ttl=600)  # 10 минут
-def get_file_structure_cached(file_service, file_id: str) -> Optional[Dict[str, Any]]:
+def get_file_structure_cached(
+        _file_service: Any,  # Union['FileService', Dict] — можно уточнить при необходимости
+        file_id: str
+) -> Optional[Dict[str, Any]]:
     """
     Кэшированная структура файлов.
-    Изменяется редко, поэтому TTL большой.
+
+    Args:
+        _file_service: FileService (подчёркивание = не хэшировать)
+        file_id: ID файла
+
+    Returns:
+        Dict или None: Информация о файле
     """
     try:
-        return file_service.get_file_info(file_id)
+        # ← Защитная проверка типа
+        if hasattr(_file_service, 'get_file_info'):
+            return _file_service.get_file_info(file_id)
+        elif isinstance(_file_service, dict):
+            # Если по ошибке передали dict — возвращаем его
+            return _file_service
+        else:
+            logger.warning(f"Неожиданный тип _file_service: {type(_file_service)}")
+            return None
     except Exception as e:
         logger.error(f"Ошибка получения структуры файла {file_id}: {e}")
         return None
@@ -94,9 +148,7 @@ def get_file_structure_cached(file_service, file_id: str) -> Optional[Dict[str, 
 # ============================================================================
 
 class CacheManager:
-    """
-    Менеджер кэша для ручного управления инвалидацией.
-    """
+    """Менеджер кэша для ручного управления инвалидацией."""
 
     @staticmethod
     def clear_all():
@@ -128,6 +180,9 @@ class CacheManager:
 def generate_cache_key(*args, **kwargs) -> str:
     """
     Генерация уникального ключа кэша из аргументов.
+
+    Returns:
+        str: MD5-хэш первых 12 символов
     """
     key_data = {
         "args": [str(arg) for arg in args],

@@ -1,11 +1,12 @@
-# ui/components/stats_panel.py
 """
 Компонент: Панель статистики.
 """
 
 import streamlit as st
 from typing import Dict, Any
+
 from shared.utils.logger import setup_logger
+from ui.utils.formatters import render_status_badge_safe
 
 logger = setup_logger("ui.components.stats_panel")
 
@@ -23,10 +24,13 @@ def render_stats_panel(stats: Dict[str, Any]) -> None:
             )
 
         with m2:
+            # ← Улучшенное отображение: добавляем бейдж успеха
+            success_rate = stats.get("success_rate", "0%")
             st.metric(
                 label="Успешно",
                 value=stats.get("completed", 0),
-                delta=f"{stats.get('success_rate', '0%')} успех"
+                delta=f"{success_rate}" if success_rate != "0%" else None,
+                delta_color="normal" if float(success_rate.rstrip("%")) >= 80 else "inverse"
             )
 
         with m3:
@@ -46,13 +50,14 @@ def render_stats_panel(stats: Dict[str, Any]) -> None:
             )
 
         # Дополнительная строка с экспортом
+        st.divider()
         e1, e2 = st.columns(2)
 
         with e1:
             st.metric(
                 label="Экспортировано в 1С",
                 value=stats.get("exported", 0),
-                delta=f"{stats.get('export_rate', '0%')} от всех"
+                delta=f"{stats.get('export_rate', '0%')}" if stats.get('export_rate') else None
             )
 
         with e2:

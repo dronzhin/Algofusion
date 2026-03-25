@@ -40,8 +40,6 @@ from shared.config.settings import get_settings
 from ui.state import get_session_state, SessionState
 from ui.cache import (
     get_redis_client_cached,
-    get_files_from_redis_cached,
-    get_file_stats_cached,
     CacheManager
 )
 from ui.pages.main_page import render_main_page

@@ -25,29 +25,29 @@ def render_main_page(session: SessionState) -> None:
         st.error("❌ Redis клиент не инициализирован")
         return
 
-    # Сайдбар
+    # Сайдбар с настройками
     _render_sidebar(session, redis_client)
 
-    # Статистика (кэшированная)
+    # Статистика (кэшированная, принимает redis_client)
     stats = get_file_stats_cached(redis_client)
     render_stats_panel(stats)
 
     st.divider()
 
-    # Прогресс обработки
+    # Прогресс обработки (принимает redis_client, сам получает файлы)
     st.subheader("📈 Прогресс обработки")
     render_progress_tracker(redis_client)
 
     st.divider()
 
-    # Реестр файлов (кэшированный)
+    # Реестр файлов (кэшированный, передаём готовый список)
     st.subheader("📄 Реестр файлов")
     files = get_files_from_redis_cached(redis_client, cache_key="files_list")
+    # ✅ ИСПРАВЛЕНО: передаём files первым аргументом (соответствует сигнатуре render_file_list)
     render_file_list(files, session, file_service)
 
-    # Обновление времени
+    # Обновление времени последнего запроса
     session.update_refresh_time()
-
 
 def _render_sidebar(session: SessionState, redis_client) -> None:
     """Рендерит боковую панель настроек."""
@@ -62,9 +62,8 @@ def _render_sidebar(session: SessionState, redis_client) -> None:
 
         st.divider()
 
-        # Фильтры
+        # Фильтры по статусу
         st.subheader("🔍 Фильтры")
-
         status_filter = st.multiselect(
             "Статус",
             ["uploaded", "processing", "completed", "failed", "exported"],
@@ -87,7 +86,7 @@ def _render_sidebar(session: SessionState, redis_client) -> None:
 
         st.divider()
 
-        # Статус подключения
+        # Статус подключения к Redis
         st.subheader("📡 Статус")
         try:
             redis_client.client.ping()
@@ -95,8 +94,20 @@ def _render_sidebar(session: SessionState, redis_client) -> None:
         except:
             st.error("❌ Redis отключен")
 
-        # Автообновление
+        # ← ✅ ИСПРАВЛЕНО: Неблокирующий авто-рефреш
         if auto_refresh:
             import time
-            time.sleep(refresh_interval)
-            st.rerun()
+
+            # Инициализируем время последнего обновления, если нужно
+            if "last_refresh_time" not in st.session_state:
+                st.session_state.last_refresh_time = time.time()
+
+            # Проверяем, прошло ли достаточно времени
+            elapsed = time.time() - st.session_state.last_refresh_time
+            if elapsed >= refresh_interval:
+                st.session_state.last_refresh_time = time.time()
+                st.rerun()  # ← Перезагружаем страницу БЕЗ блокировки
+            else:
+                # Показываем индикатор следующего обновления
+                remaining = int(refresh_interval - elapsed)
+                st.caption(f"🔄 След. обновление через {remaining}с")

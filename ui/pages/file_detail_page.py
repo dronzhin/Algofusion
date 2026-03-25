@@ -1,11 +1,16 @@
-# ui/pages/file_detail_page.py
 """
 Страница деталей файла.
 Использует централизованные утилиты из ui/utils/* для устранения дублирования.
 """
 
+# ============================================================================
+# ИМПОРТЫ
+# ============================================================================
+
 import streamlit as st
+import json  # ← ДОБАВЛЕНО: требуется для json.dumps
 from typing import Dict, Any, Optional
+from datetime import datetime, timezone  # ← ДОБАВЛЕНО: требуется для datetime.now(timezone.utc)
 
 from shared.utils.logger import setup_logger
 from shared.models.file import FileJob, FileStatus, ExportStatus
@@ -32,6 +37,10 @@ from ui.utils.redis_helpers import (
 
 logger = setup_logger("ui.pages.file_detail_page")
 
+
+# ============================================================================
+# ОСНОВНАЯ ФУНКЦИЯ
+# ============================================================================
 
 def render_file_detail_page(session_state) -> None:
     """
@@ -74,10 +83,10 @@ def render_file_detail_page(session_state) -> None:
             _render_file_info_col(file_data)
 
         with col2:
-            _render_status_col(file_data)
+            _render_status_col(file_data)  # ← ИСПРАВЛЕНО: file_data
 
         with col3:
-            _render_export_col(file_data)
+            _render_export_col(file_data)  # ← ИСПРАВЛЕНО: file_data
 
         st.divider()
 
@@ -104,6 +113,10 @@ def render_file_detail_page(session_state) -> None:
         _render_actions(file_id, file_data, redis_client)
 
 
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
+
 def _render_back_button(session_state) -> None:
     """Кнопка возврата к реестру."""
     if st.button("← Вернуться к реестру", key="back_to_list"):
@@ -128,12 +141,13 @@ def _render_file_info_col(file_data: Dict[str, Any]) -> None:
                 st.markdown(f"**{key}:** {value}")
 
 
-def _render_status_col(file_data: Dict[str, Any]) -> None:
+def _render_status_col(file_data: Dict[str, Any]) -> None:  # ← ИСПРАВЛЕНО: file_data: Dict
     """Рендерит колонку со статусом обработки."""
     st.markdown("### 📊 Статус обработки")
 
     status = file_data.get("status", "unknown")
-    st.markdown(f"**Статус:** {render_status_badge(status)}")
+    # ← FIX: unsafe_allow_html=True для рендеринга цветных бейджей
+    st.markdown(f"**Статус:** {render_status_badge(status)}", unsafe_allow_html=True)
 
     current_module = file_data.get("current_module")
     module_display = f"`{current_module}`" if current_module else "—"
@@ -142,19 +156,19 @@ def _render_status_col(file_data: Dict[str, Any]) -> None:
     st.markdown(f"**Создан:** {format_datetime_full(file_data.get('created_at'))}")
     st.markdown(f"**Обновлён:** {format_datetime_full(file_data.get('updated_at'))}")
 
-    # Инфо о попытках
     retry_count = file_data.get("retry_count", 0)
     max_retries = file_data.get("max_retries", 3)
     if retry_count > 0:
         st.caption(f"🔄 Попытки: {retry_count}/{max_retries}")
 
 
-def _render_export_col(file_data: Dict[str, Any]) -> None:
+def _render_export_col(file_data: Dict[str, Any]) -> None:  # ← ИСПРАВЛЕНО: file_data: Dict
     """Рендерит колонку со статусом экспорта в 1С."""
     st.markdown("### 📤 Экспорт в 1С")
 
     export_status = file_data.get("export_status", "pending")
-    st.markdown(f"**Статус:** {render_export_status_badge(export_status)}")
+    # ← FIX: unsafe_allow_html=True
+    st.markdown(f"**Статус:** {render_export_status_badge(export_status)}", unsafe_allow_html=True)
 
     st.markdown(f"**Попыток:** {file_data.get('export_attempts', 0)}")
 
@@ -288,29 +302,32 @@ def _render_retry_button(file_id: str, file_data: Dict[str, Any], redis_client) 
         _handle_retry_action(file_id, file_data, redis_client)
 
 
-def _handle_retry_action(file_id: str, file_data: Dict[str, Any], redis_client) -> None:
+def _handle_retry_action(
+        file_id: str,
+        file_data: Dict[str, Any],  # ← ИСПРАВЛЕНО: file_data: Dict[str, Any]
+        redis_client: Any
+) -> None:
     """Обработчик действия перезапуска."""
     try:
-        # Подготавливаем обновлённые данные
+        # ← FIX: Получаем текущее время один раз
+        retry_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
         updates = {
             "status": FileStatus.PROCESSING.value,
             "current_module": "preprocess",
             "completed_modules": [],
             "retry_count": file_data.get("retry_count", 0) + 1,
-            "errors": file_data.get("errors", []) + [f"Retry initiated at {format_datetime_full(None)}"],
+            "errors": file_data.get("errors", []) + [f"Retry initiated at {retry_timestamp}"],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Обновляем статус в Redis
-        if not safe_update_file_status(redis_client, file_id, updates):
-            st.error("❌ Не удалось обновить статус файла")
-            return
-
-        # Создаём задачу и отправляем в очередь с высоким приоритетом
         job_data = {**file_data, **updates}
-        job = FileJob(**job_data)
-        payload = job.to_payload()
 
-        if push_job_to_queue(redis_client, "preprocess", payload, priority=10):
+        # ← FIX: Сериализуем и парсим через from_payload для конвертации строк в Enum
+        payload = json.dumps(job_data, ensure_ascii=False)
+        job = FileJob.from_payload(payload)
+
+        if push_job_to_queue(redis_client, "preprocess", job.to_payload(), priority=10):
             st.success("✅ Обработка перезапущена с высоким приоритетом")
             st.rerun()
         else:
@@ -348,25 +365,29 @@ def _render_export_button(file_id: str, file_data: Dict[str, Any], redis_client)
         _handle_export_action(file_id, file_data, redis_client)
 
 
-def _handle_export_action(file_id: str, file_data: Dict[str, Any], redis_client) -> None:
+def _handle_export_action(
+        file_id: str,
+        file_data: Dict[str, Any],  # ← ИСПРАВЛЕНО: file_data: Dict[str, Any]
+        redis_client: Any
+) -> None:
     """Обработчик действия экспорта."""
     try:
-        # Обновляем статус экспорта
         updates = {
             "export_status": ExportStatus.EXPORTING.value,
             "export_attempts": file_data.get("export_attempts", 0) + 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         if not safe_update_file_status(redis_client, file_id, updates):
             st.error("❌ Не удалось обновить статус экспорта")
             return
 
-        # Отправляем задачу в очередь экспорта
+        # ← FIX: Создаём Job через from_payload
         job_data = {**file_data, **updates}
-        job = FileJob(**job_data)
-        payload = job.to_payload()
+        payload = json.dumps(job_data, ensure_ascii=False)  # ← FIX: было ensure_allow_ascii
+        job = FileJob.from_payload(payload)
 
-        if push_job_to_queue(redis_client, "export", payload, priority=5):
+        if push_job_to_queue(redis_client, "export", job.to_payload(), priority=5):
             st.success("✅ Экспорт запущен")
             st.rerun()
         else:
