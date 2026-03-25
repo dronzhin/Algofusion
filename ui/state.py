@@ -1,207 +1,129 @@
-# ui/state.py (фрагмент с исправлениями)
+# ui/state.py
 """
-Управление session_state для Streamlit UI.
-Инкапсулирует всю логику работы с состоянием сессии.
+Управление состоянием сессии Streamlit.
+Использует singleton-паттерн для глобального доступа.
 """
+
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set
 
 import streamlit as st
-from typing import Any, Dict, List, Optional, Callable, TYPE_CHECKING
-from datetime import datetime, timedelta
-from shared.utils.logger import setup_logger
-from core.state import get_app_state
 
-# Для типизации без циклических импортов
-if TYPE_CHECKING:
-    from core.services.redis_client import RedisClient
-    from core.services.file_service import FileService
-    from shared.config.settings import Settings
+from shared.utils.logger import setup_logger
 
 logger = setup_logger("ui.state")
 
 
+@dataclass
 class SessionState:
-    """
-    Обёртка над st.session_state для типобезопасного доступа.
-    """
+    """Глобальное состояние сессии приложения."""
 
-    # Ключи состояния
-    KEYS = {
-        "current_page": "main",
-        "editing_file_index": None,
-        "export_logs": [],
-        "file_cache": {},
-        "last_refresh": None,
-        "filters": {},
-        "user_preferences": {},
-        "pubsub": None,
-        "redis_client": None,
-        "file_service": None,
-        "settings": None,
-    }
+    # Навигация
+    current_page: str = "main"
+    editing_file_index: Optional[int] = None
 
-    @classmethod
-    def initialize(cls) -> "SessionState":
-        """Инициализация состояния сессии."""
-        for key, default_value in cls.KEYS.items():
-            if key not in st.session_state:
-                if isinstance(default_value, (list, dict)):
-                    st.session_state[key] = default_value.copy()
-                else:
-                    st.session_state[key] = default_value
+    # Сервисы (инициализируются отдельно)
+    redis_client: Any = None
+    file_service: Any = None
+    settings: Any = None
 
-        logger.debug("SessionState инициализирован")
-        return cls()
+    # Кэширование
+    cache_timestamp: float = field(default_factory=time.time)
+    last_refresh: Optional[datetime] = None
 
-    # ========================================================================
-    # СВОЙСТВА С ГЕТТЕРАМИ И СЕТТЕРАМИ
-    # ========================================================================
+    # Фильтры
+    _filters: Dict[str, List[str]] = field(default_factory=dict)
 
-    @property
-    def current_page(self) -> str:
-        return st.session_state.current_page
+    # Логи
+    _logs: List[Dict[str, str]] = field(default_factory=list)
+    max_logs: int = 100
 
-    @current_page.setter
-    def current_page(self, value: str):
-        st.session_state.current_page = value
-        logger.debug(f"Навигация: {value}")
+    # Pub/Sub
+    pubsub: Any = None
 
-    @property
-    def editing_file_index(self) -> Optional[int]:
-        return st.session_state.editing_file_index
+    # ← Поля для совместимости с UI (значения синхронизируются через st.session_state)
+    auto_refresh: bool = True
+    refresh_interval: int = 10
+    _cache_buster: str = field(default_factory=lambda: f"v{time.time()}", repr=False)
 
-    @editing_file_index.setter
-    def editing_file_index(self, value: Optional[int]):
-        st.session_state.editing_file_index = value
+    def get_filter(self, key: str, default: List[str] = None) -> List[str]:
+        """Получение фильтра по ключу."""
+        return self._filters.get(key, default or [])
 
-    @property
-    def redis_client(self) -> Optional["RedisClient"]:
-        return st.session_state.redis_client
-
-    @redis_client.setter  # ← ДОБАВЛЕНО: сеттер для redis_client
-    def redis_client(self, value: Optional["RedisClient"]):
-        st.session_state.redis_client = value
-        if value is not None:
-            logger.debug("Redis клиент установлен в сессию")
-
-    @property
-    def file_service(self) -> Optional["FileService"]:
-        return st.session_state.file_service
-
-    @file_service.setter  # ← ДОБАВЛЕНО: сеттер для file_service
-    def file_service(self, value: Optional["FileService"]):
-        st.session_state.file_service = value
-        if value is not None:
-            logger.debug("FileService установлен в сессию")
-
-    @property
-    def settings(self) -> Optional["Settings"]:
-        return st.session_state.settings
-
-    @settings.setter  # ← ДОБАВЛЕНО: сеттер для settings
-    def settings(self, value: Optional["Settings"]):
-        st.session_state.settings = value
-
-    @property
-    def pubsub(self):
-        return st.session_state.pubsub
-
-    @pubsub.setter  # ← ДОБАВЛЕНО: сеттер для pubsub
-    def pubsub(self, value):
-        st.session_state.pubsub = value
-
-    # ========================================================================
-    # СВОЙСТВА ТОЛЬКО ДЛЯ ЧТЕНИЯ (без сеттеров)
-    # ========================================================================
-
-    @property
-    def export_logs(self) -> List[Dict[str, str]]:
-        return st.session_state.export_logs
-
-    @property
-    def file_cache(self) -> Dict[str, Any]:
-        return st.session_state.file_cache
-
-    @property
-    def last_refresh(self) -> Optional[datetime]:
-        return st.session_state.last_refresh
-
-    # ========================================================================
-    # МЕТОДЫ
-    # ========================================================================
-
-    def navigate(self, page: str, **kwargs):
-        """Безопасная навигация между страницами."""
-        self.current_page = page  # Использует сеттер
-        for key, value in kwargs.items():
-            if key in self.KEYS:
-                setattr(self, key, value)  # Использует сеттеры если есть
-        logger.info(f"Навигация: {page}")
+    def set_filter(self, key: str, value: List[str]):
+        """Установка фильтра по ключу."""
+        self._filters[key] = value
 
     def add_log(self, status: str, message: str):
-        """Добавление лога в сессию."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        st.session_state.export_logs.append({
-            "time": timestamp,
+        """Добавление записи в лог."""
+        from datetime import datetime
+        self._logs.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
             "status": status,
             "msg": message
         })
-        # Храним последние 50 логов
-        if len(st.session_state.export_logs) > 50:
-            st.session_state.export_logs = st.session_state.export_logs[-50:]
-        logger.debug(f"Лог добавлен: [{status}] {message}")
+        # Ограничиваем размер лога
+        if len(self._logs) > self.max_logs:
+            self._logs = self._logs[-self.max_logs:]
 
-    def invalidate_cache(self, key: Optional[str] = None):
-        """Инвалидация кэша."""
-        if key:
-            st.session_state.file_cache.pop(key, None)
-            logger.debug(f"Кэш инвалидирован: {key}")
-        else:
-            st.session_state.file_cache = {}
-            logger.debug("Весь кэш инвалидирован")
+    def get_logs(self, limit: int = 20) -> List[Dict[str, str]]:
+        """Получение последних логов."""
+        return self._logs[-limit:] if self._logs else []
 
-    def set_filter(self, filter_name: str, value: Any):
-        """Установка фильтра."""
-        if "filters" not in st.session_state:
-            st.session_state.filters = {}
-        st.session_state.filters[filter_name] = value
-        self.invalidate_cache("files_list")
+    def clear_logs(self):
+        """Очистка логов."""
+        self._logs.clear()
 
-    def get_filter(self, filter_name: str, default: Any = None) -> Any:
-        """Получение фильтра."""
-        return st.session_state.get("filters", {}).get(filter_name, default)
-
-    def reset_filters(self):
-        """Сброс всех фильтров."""
-        st.session_state.filters = {}
-        self.invalidate_cache("files_list")
-        logger.info("Фильтры сброшены")
+    def invalidate_cache(self):
+        """Инвалидация кэша — обновляет таймстамп и cache_buster."""
+        self.cache_timestamp = time.time()
+        self._cache_buster = f"v{time.time()}"
+        logger.debug(f"Кэш инвалидирован: {self._cache_buster}")
 
     def update_refresh_time(self):
-        """Обновление времени последнего обновления."""
-        st.session_state.last_refresh = datetime.now()
+        """Обновляет время последнего запроса."""
+        self.last_refresh = datetime.now()
+
+    def navigate(self, page: str, **kwargs):
+        """Навигация к странице с параметрами."""
+        self.current_page = page
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def get_uptime(self) -> str:
-        """Получение времени работы сессии."""
-        app_state = get_app_state()
-        app_state.update_uptime()
-        hours = app_state.uptime_seconds // 3600
-        minutes = (app_state.uptime_seconds % 3600) // 60
-        return f"{hours}ч {minutes}м"
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Экспорт состояния для отладки."""
-        return {
-            "current_page": self.current_page,
-            "editing_file_index": self.editing_file_index,
-            "logs_count": len(self.export_logs),
-            "cache_keys": list(self.file_cache.keys()),
-            "last_refresh": self.last_refresh.isoformat() if self.last_refresh else None,
-            "filters": st.session_state.get("filters", {}),
-            "uptime": self.get_uptime()
-        }
+        """Время работы приложения."""
+        if not self.last_refresh:
+            return "—"
+        delta = datetime.now() - self.last_refresh
+        total_seconds = int(delta.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-# Глобальный экземпляр для удобства
+# ============================================================================
+# SINGLETON ACCESS
+# ============================================================================
+
+_SESSION_STATE_KEY = "_algofusion_session_state"
+
+
 def get_session_state() -> SessionState:
-    """Получение экземпляра SessionState."""
-    return SessionState.initialize()
+    """
+    Получение глобального экземпляра SessionState.
+    Использует streamlit.session_state для сохранения между rerun.
+    """
+    if _SESSION_STATE_KEY not in st.session_state:
+        logger.info("Инициализация нового SessionState")
+        st.session_state[_SESSION_STATE_KEY] = SessionState()
+
+    return st.session_state[_SESSION_STATE_KEY]
+
+
+def reset_session_state():
+    """Сброс состояния (для тестов или принудительного обновления)."""
+    if _SESSION_STATE_KEY in st.session_state:
+        del st.session_state[_SESSION_STATE_KEY]
+    logger.info("SessionState сброшен")

@@ -1,3 +1,4 @@
+# ui/cache.py
 """
 Слой кэширования для Streamlit UI.
 Использует @st.cache_data и @st.cache_resource для оптимизации.
@@ -6,6 +7,7 @@
 import streamlit as st
 import hashlib
 import json
+import time
 from typing import Any, Dict, List, Optional, Callable, Union, TYPE_CHECKING
 from datetime import datetime, timedelta
 from functools import wraps
@@ -35,15 +37,15 @@ def get_redis_client_cached():
 
 @st.cache_data(ttl=60)  # 60 секунд
 def get_files_from_redis_cached(
-        _redis_client: Union['RedisClient', List[Dict[str, Any]]],
-        cache_key: str = "all"
+    _redis_client: Union['RedisClient', List[Dict[str, Any]]],
+    _cache_key: str = "default"  # ← Параметр для инвалидации (не хэшируется)
 ) -> List[Dict[str, Any]]:
     """
     Кэшированное получение списка файлов из Redis.
 
     Args:
         _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
-        cache_key: Ключ для дифференциации кэша
+        _cache_key: Уникальный ключ для принудительной инвалидации кэша
 
     Returns:
         List[Dict]: Список файлов из Redis
@@ -56,7 +58,7 @@ def get_files_from_redis_cached(
         # Если это клиент — получаем файлы
         if hasattr(_redis_client, 'get_all_files'):
             files = _redis_client.get_all_files()
-            logger.debug(f"Загружено {len(files)} файлов из Redis (кэш: {cache_key})")
+            logger.debug(f"Загружено {len(files)} файлов из Redis (кэш: {_cache_key})")
             return files
         else:
             logger.warning(f"Неожиданный тип _redis_client: {type(_redis_client)}")
@@ -69,13 +71,15 @@ def get_files_from_redis_cached(
 
 @st.cache_data(ttl=300)  # 5 минут
 def get_file_stats_cached(
-        _redis_client: Union['RedisClient', List[Dict[str, Any]]]
+    _redis_client: Union['RedisClient', List[Dict[str, Any]]],
+    _cache_key: str = "default"  # ← Параметр для инвалидации
 ) -> Dict[str, Any]:
     """
     Кэшированная статистика файлов.
 
     Args:
         _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
+        _cache_key: Уникальный ключ для принудительной инвалидации кэша
 
     Returns:
         Dict: Статистика файлов
@@ -115,8 +119,9 @@ def get_file_stats_cached(
 
 @st.cache_data(ttl=600)  # 10 минут
 def get_file_structure_cached(
-        _file_service: Any,  # Union['FileService', Dict] — можно уточнить при необходимости
-        file_id: str
+    _file_service: Any,  # Union['FileService', Dict]
+    file_id: str,
+    _cache_key: str = "default"  # ← Параметр для инвалидации
 ) -> Optional[Dict[str, Any]]:
     """
     Кэшированная структура файлов.
@@ -124,6 +129,7 @@ def get_file_structure_cached(
     Args:
         _file_service: FileService (подчёркивание = не хэшировать)
         file_id: ID файла
+        _cache_key: Уникальный ключ для принудительной инвалидации кэша
 
     Returns:
         Dict или None: Информация о файле
@@ -133,7 +139,6 @@ def get_file_structure_cached(
         if hasattr(_file_service, 'get_file_info'):
             return _file_service.get_file_info(file_id)
         elif isinstance(_file_service, dict):
-            # Если по ошибке передали dict — возвращаем его
             return _file_service
         else:
             logger.warning(f"Неожиданный тип _file_service: {type(_file_service)}")
