@@ -102,13 +102,17 @@ def deskew(gray: np.ndarray) -> np.ndarray:
         35,
         7,
     )
-    coords = np.column_stack(np.where(thresh > 0))
+    # np.where returns (y, x), while minAreaRect expects points in (x, y).
+    coords = np.column_stack(np.where(thresh > 0))[:, ::-1]
     if coords.shape[0] < 200:
         return gray
 
     angle = cv2.minAreaRect(coords)[-1]
     if angle < -45:
         angle = 90 + angle
+    if abs(angle) > 15:
+        logger.warning("Skipping deskew with suspicious angle: %.2f", angle)
+        return gray
 
     h, w = gray.shape[:2]
     center = (w // 2, h // 2)
