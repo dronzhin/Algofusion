@@ -1,6 +1,50 @@
 import copy
 import re
 
+VISUAL_QUOTES_MAP = str.maketrans({
+    "В«": '"',
+    "В»": '"',
+    "вЂњ": '"',
+    "вЂќ": '"',
+    "вЂћ": '"',
+    "вЂ™": "'",
+    "вЂ": "'",
+})
+
+
+def clean_spaces(s: str) -> str:
+    s = str(s).replace("\xa0", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def normalize_generic_text(value):
+    if value is None:
+        return None
+
+    s = clean_spaces(value)
+    if not s:
+        return None
+
+    s = s.translate(VISUAL_QUOTES_MAP)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"\s+([,.;:])", r"\1", s)
+    s = re.sub(r"([,.;:])(\S)", r"\1 \2", s)
+    s = re.sub(r"\s+", " ", s).strip(" ,.;:")
+    return s or None
+
+
+def normalize_money_words_text(value):
+    s = normalize_generic_text(value)
+    if not s:
+        return None
+
+    s = re.sub(r"\bРєРѕРїРµР№Рє\b", "РєРѕРїРµР№РєРё", s, flags=re.I)
+    s = re.sub(r"(?<=\d)\s*СЂСѓР±\b\.?", " СЂСѓР±.", s, flags=re.I)
+    s = re.sub(r"(?<=\d)\s*РєРѕРї\b\.?", " РєРѕРї.", s, flags=re.I)
+    s = re.sub(r"\s+", " ", s).strip(" ,.;:")
+    return s or None
+
 
 def reconcile_document_amounts(doc_type, payload, tol=0.02):
     """
