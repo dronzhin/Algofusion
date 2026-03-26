@@ -50,7 +50,6 @@ services:
       context: .
       dockerfile: monitor/Dockerfile
     container_name: algofusion-file-monitor
-    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
       - ${HOST_INCOMING_PATH:-/home/dmitry/incoming}:/external/incoming:rw
