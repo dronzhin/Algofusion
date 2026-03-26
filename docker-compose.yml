@@ -72,8 +72,8 @@ services:
 
   worker-cleaner:
     build:
-      context: .
-      dockerfile: workers/CLEANER/Dockerfile
+      context: ./workers/CLEANER
+      dockerfile: Dockerfile
     container_name: algofusion-worker-cleaner
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -93,8 +93,8 @@ services:
 
   worker-layout:
     build:
-      context: .
-      dockerfile: workers/LAYOUT/Dockerfile
+      context: ./workers/LAYOUT
+      dockerfile: Dockerfile
     container_name: algofusion-worker-layout
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -114,8 +114,8 @@ services:
 
   worker-ocr:
     build:
-      context: .
-      dockerfile: workers/OCR/Dockerfile
+      context: ./workers/OCR
+      dockerfile: Dockerfile
     container_name: algofusion-worker-ocr
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -137,8 +137,8 @@ services:
 
   worker-parser:
     build:
-      context: .
-      dockerfile: workers/PARSER/Dockerfile
+      context: ./workers/PARSER
+      dockerfile: Dockerfile
     container_name: algofusion-worker-parser
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -158,8 +158,8 @@ services:
 
   worker-normalizer:
     build:
-      context: .
-      dockerfile: workers/NORMALIZER/Dockerfile
+      context: ./workers/NORMALIZER
+      dockerfile: Dockerfile
     container_name: algofusion-worker-normalizer
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -179,8 +179,8 @@ services:
 
   worker-reconcile:
     build:
-      context: .
-      dockerfile: workers/RECONCILE/Dockerfile
+      context: ./workers/RECONCILE
+      dockerfile: Dockerfile
     container_name: algofusion-worker-reconcile
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
@@ -200,8 +200,8 @@ services:
 
   worker-final-json:
     build:
-      context: .
-      dockerfile: workers/FINAL_JSON/Dockerfile
+      context: ./workers/FINAL_JSON
+      dockerfile: Dockerfile
     container_name: algofusion-worker-final-json
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
