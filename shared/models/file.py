@@ -1,7 +1,7 @@
 # shared/models/file.py
 """
-Модель файла для обмена между модулями.
-Единая модель для UI, Workers и Monitor.
+Р СљР С•Р Т‘Р ВµР В»РЎРЉ РЎвЂћР В°Р в„–Р В»Р В° Р Т‘Р В»РЎРЏ Р С•Р В±Р СР ВµР Р…Р В° Р СР ВµР В¶Р Т‘РЎС“ Р СР С•Р Т‘РЎС“Р В»РЎРЏР СР С‘.
+Р вЂўР Т‘Р С‘Р Р…Р В°РЎРЏ Р СР С•Р Т‘Р ВµР В»РЎРЉ Р Т‘Р В»РЎРЏ UI, Workers Р С‘ Monitor.
 """
 
 from dataclasses import dataclass, field
@@ -17,7 +17,7 @@ logger = setup_logger("shared.models.file")
 
 
 class FileType(str, Enum):
-    """Типы файлов для маршрутизации."""
+    """Р СћР С‘Р С—РЎвЂ№ РЎвЂћР В°Р в„–Р В»Р С•Р Р† Р Т‘Р В»РЎРЏ Р СР В°РЎР‚РЎв‚¬РЎР‚РЎС“РЎвЂљР С‘Р В·Р В°РЎвЂ Р С‘Р С‘."""
     IMAGE = "image"
     PDF = "pdf"
     DOCUMENT = "document"
@@ -26,7 +26,7 @@ class FileType(str, Enum):
 
 
 class FileStatus(str, Enum):
-    """Статус обработки файла."""
+    """Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р С‘ РЎвЂћР В°Р в„–Р В»Р В°."""
     UPLOADED = "uploaded"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -35,7 +35,7 @@ class FileStatus(str, Enum):
 
 
 class ExportStatus(str, Enum):
-    """Статус экспорта в 1С."""
+    """Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ РЎРЊР С”РЎРѓР С—Р С•РЎР‚РЎвЂљР В° Р Р† 1Р РЋ."""
     PENDING = "pending"
     EXPORTING = "exporting"
     SUCCESS = "success"
@@ -44,7 +44,7 @@ class ExportStatus(str, Enum):
 
 @dataclass
 class ExportConfig:
-    """Конфигурация экспорта в 1С."""
+    """Р С™Р С•Р Р…РЎвЂћР С‘Р С–РЎС“РЎР‚Р В°РЎвЂ Р С‘РЎРЏ РЎРЊР С”РЎРѓР С—Р С•РЎР‚РЎвЂљР В° Р Р† 1Р РЋ."""
     enabled: bool = False
     mode: str = "manual"  # manual, auto, batch
     format: str = "1c_xml"
@@ -55,7 +55,7 @@ class ExportConfig:
 
 @dataclass
 class FileJob:
-    """Модель задания для обработки файла."""
+    """Р СљР С•Р Т‘Р ВµР В»РЎРЉ Р В·Р В°Р Т‘Р В°Р Р…Р С‘РЎРЏ Р Т‘Р В»РЎРЏ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р С‘ РЎвЂћР В°Р в„–Р В»Р В°."""
 
     file_id: str
     original_filename: str
@@ -91,10 +91,10 @@ class FileJob:
 
     @classmethod
     def from_payload(cls, payload: str) -> "FileJob":
-        """Создание FileJob из JSON payload."""
+        """Р РЋР С•Р В·Р Т‘Р В°Р Р…Р С‘Р Вµ FileJob Р С‘Р В· JSON payload."""
         try:
             data = json.loads(payload)
-            logger.debug(f"Создание FileJob из payload: file_id={data.get('file_id')}")
+            logger.debug(f"Р РЋР С•Р В·Р Т‘Р В°Р Р…Р С‘Р Вµ FileJob Р С‘Р В· payload: file_id={data.get('file_id')}")
 
             file_type = FileType(data.get("file_type", "unknown"))
             status = FileStatus(data.get("status", "uploaded"))
@@ -107,7 +107,7 @@ class FileJob:
             export_config_data = data.get("export_config", {})
             export_config = ExportConfig(**export_config_data) if export_config_data else ExportConfig()
 
-            # ← FIX: Парсинг datetime с поддержкой timezone
+            # РІвЂ С’ FIX: Р СџР В°РЎР‚РЎРѓР С‘Р Р…Р С– datetime РЎРѓ Р С—Р С•Р Т‘Р Т‘Р ВµРЎР‚Р В¶Р С”Р С•Р в„– timezone
             exported_at = None
             if data.get("exported_at"):
                 exported_at = cls._parse_datetime(data["exported_at"])
@@ -139,11 +139,11 @@ class FileJob:
                 errors=data.get("errors", [])
             )
         except Exception as e:
-            logger.error(f"Ошибка парсинга payload: {e}", exc_info=True)
+            logger.error(f"Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р С—Р В°РЎР‚РЎРѓР С‘Р Р…Р С–Р В° payload: {e}", exc_info=True)
             raise
 
     def to_dict(self) -> Dict[str, Any]:
-        """Конвертация в словарь."""
+        """Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏ Р Р† РЎРѓР В»Р С•Р Р†Р В°РЎР‚РЎРЉ."""
         return {
             "file_id": self.file_id,
             "original_filename": self.original_filename,
@@ -180,19 +180,28 @@ class FileJob:
         }
 
     def to_payload(self) -> str:
-        """Сериализация для отправки в очередь."""
+        """Р РЋР ВµРЎР‚Р С‘Р В°Р В»Р С‘Р В·Р В°РЎвЂ Р С‘РЎРЏ Р Т‘Р В»РЎРЏ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘ Р Р† Р С•РЎвЂЎР ВµРЎР‚Р ВµР Т‘РЎРЉ."""
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
+    def get_storage_dir_name(self) -> str:
+        """Storage directory name for the file."""
+        return Path(self.original_filename).stem
+
     def get_base_path(self, base_dir: str = "/shared/files") -> Path:
-        """Базовая папка для этого файла."""
-        return Path(base_dir) / self.file_id
+        """Base directory for this file."""
+        base_dir_path = Path(base_dir)
+        preferred = base_dir_path / self.get_storage_dir_name()
+        legacy = base_dir_path / self.file_id
+        if legacy.exists() and not preferred.exists():
+            return legacy
+        return preferred
 
     def get_original_path(self, base_dir: str = "/shared/files") -> Path:
-        """Путь к оригинальному файлу."""
+        """Р СџРЎС“РЎвЂљРЎРЉ Р С” Р С•РЎР‚Р С‘Р С–Р С‘Р Р…Р В°Р В»РЎРЉР Р…Р С•Р СРЎС“ РЎвЂћР В°Р в„–Р В»РЎС“."""
         return self.get_base_path(base_dir) / "original" / self.original_filename
 
     def get_module_input_path(self, module: str, base_dir: str = "/shared/files") -> Path:
-        """Путь к входному файлу для модуля."""
+        """Р СџРЎС“РЎвЂљРЎРЉ Р С” Р Р†РЎвЂ¦Р С•Р Т‘Р Р…Р С•Р СРЎС“ РЎвЂћР В°Р в„–Р В»РЎС“ Р Т‘Р В»РЎРЏ Р СР С•Р Т‘РЎС“Р В»РЎРЏ."""
         base = self.get_base_path(base_dir)
 
         if module == "cleaner":
@@ -210,7 +219,7 @@ class FileJob:
         return self.get_original_path(base_dir)
 
     def get_module_output_path(self, module: str, base_dir: str = "/shared/files") -> Path:
-        """Путь для результата модуля."""
+        """Р СџРЎС“РЎвЂљРЎРЉ Р Т‘Р В»РЎРЏ РЎР‚Р ВµР В·РЎС“Р В»РЎРЉРЎвЂљР В°РЎвЂљР В° Р СР С•Р Т‘РЎС“Р В»РЎРЏ."""
         base = self.get_base_path(base_dir) / module
         base.mkdir(parents=True, exist_ok=True)
 
@@ -224,21 +233,21 @@ class FileJob:
         return base / self.original_filename
 
     def get_export_path(self, base_dir: str = "/shared/files") -> Path:
-        """Путь для XML экспорта."""
+        """Р СџРЎС“РЎвЂљРЎРЉ Р Т‘Р В»РЎРЏ XML РЎРЊР С”РЎРѓР С—Р С•РЎР‚РЎвЂљР В°."""
         export_dir = self.get_base_path(base_dir) / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
         name = Path(self.original_filename).stem
         return export_dir / f"{name}_1c.xml"
 
     def get_archive_path(self, base_dir: str = "/shared/files") -> Path:
-        """Путь для архива после обработки."""
+        """Р СџРЎС“РЎвЂљРЎРЉ Р Т‘Р В»РЎРЏ Р В°РЎР‚РЎвЂ¦Р С‘Р Р†Р В° Р С—Р С•РЎРѓР В»Р Вµ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р С‘."""
         archive_dir = self.get_base_path(base_dir) / "archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
         return archive_dir / f"{self.file_id}_processed.zip"
 
     @classmethod
     def detect_file_type(cls, filename: str) -> FileType:
-        """Определение типа файла по расширению."""
+        """Р С›Р С—РЎР‚Р ВµР Т‘Р ВµР В»Р ВµР Р…Р С‘Р Вµ РЎвЂљР С‘Р С—Р В° РЎвЂћР В°Р в„–Р В»Р В° Р С—Р С• РЎР‚Р В°РЎРѓРЎв‚¬Р С‘РЎР‚Р ВµР Р…Р С‘РЎР‹."""
         ext = Path(filename).suffix.lower()
         extensions = {
             FileType.IMAGE: {".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp"},
@@ -252,7 +261,7 @@ class FileJob:
         return FileType.UNKNOWN
 
     def get_allowed_modules(self) -> List[str]:
-        """Получить список модулей для этого типа файла."""
+        """Р СџР С•Р В»РЎС“РЎвЂЎР С‘РЎвЂљРЎРЉ РЎРѓР С—Р С‘РЎРѓР С•Р С” Р СР С•Р Т‘РЎС“Р В»Р ВµР в„– Р Т‘Р В»РЎРЏ РЎРЊРЎвЂљР С•Р С–Р С• РЎвЂљР С‘Р С—Р В° РЎвЂћР В°Р в„–Р В»Р В°."""
         routing = {
             FileType.IMAGE: ["cleaner", "layout", "ocr", "parser", "normalizer", "reconcile", "final_json"],
             FileType.PDF: ["cleaner", "layout", "ocr", "parser", "normalizer", "reconcile", "final_json"],
@@ -263,16 +272,16 @@ class FileJob:
         return routing.get(self.file_type, [])
 
     def complete_module(self, module: str):
-        """Завершить модуль."""
+        """Р вЂ”Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљРЎРЉ Р СР С•Р Т‘РЎС“Р В»РЎРЉ."""
         self.completed_modules.add(module)
         self.current_module = None
         self.updated_at = datetime.now(timezone.utc)
-        logger.debug(f"Модуль {module} завершён для файла {self.file_id}")
+        logger.debug(f"Р СљР С•Р Т‘РЎС“Р В»РЎРЉ {module} Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬РЎвЂР Р… Р Т‘Р В»РЎРЏ РЎвЂћР В°Р в„–Р В»Р В° {self.file_id}")
 
     def add_to_history(self, action: str, module: str, success: bool,
                        error: str = None, duration: float = None):
-        """Добавить запись в историю."""
-        # ← FIX: timezone-aware datetime
+        """Р вЂќР С•Р В±Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р В·Р В°Р С—Р С‘РЎРѓРЎРЉ Р Р† Р С‘РЎРѓРЎвЂљР С•РЎР‚Р С‘РЎР‹."""
+        # РІвЂ С’ FIX: timezone-aware datetime
         self.history.append({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "module": module,
@@ -284,30 +293,30 @@ class FileJob:
         self.updated_at = datetime.now(timezone.utc)
 
     def is_complete(self) -> bool:
-        """Проверить завершена ли обработка."""
+        """Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р ВµР Р…Р В° Р В»Р С‘ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р В°."""
         if self.status == FileStatus.FAILED:
             return True
         allowed = self.get_allowed_modules()
         return all(m in self.completed_modules for m in allowed)
 
     def can_retry(self) -> bool:
-        """Проверить можно ли повторить обработку."""
+        """Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚Р С‘РЎвЂљРЎРЉ Р СР С•Р В¶Р Р…Р С• Р В»Р С‘ Р С—Р С•Р Р†РЎвЂљР С•РЎР‚Р С‘РЎвЂљРЎРЉ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”РЎС“."""
         return self.retry_count < self.max_retries
 
     def increment_retry(self):
-        """Увеличить счётчик попыток."""
+        """Р Р€Р Р†Р ВµР В»Р С‘РЎвЂЎР С‘РЎвЂљРЎРЉ РЎРѓРЎвЂЎРЎвЂРЎвЂљРЎвЂЎР С‘Р С” Р С—Р С•Р С—РЎвЂ№РЎвЂљР С•Р С”."""
         self.retry_count += 1
         self.updated_at = datetime.now(timezone.utc)
-        logger.warning(f"Попытка {self.retry_count}/{self.max_retries} для файла {self.file_id}")
+        logger.warning(f"Р СџР С•Р С—РЎвЂ№РЎвЂљР С”Р В° {self.retry_count}/{self.max_retries} Р Т‘Р В»РЎРЏ РЎвЂћР В°Р в„–Р В»Р В° {self.file_id}")
 
     @staticmethod
     def _parse_datetime(value: str) -> datetime:
         """
-        Парсит ISO-строку в datetime, обеспечивая timezone-aware результат.
-        Если строка без таймзоны — добавляет UTC.
+        Р СџР В°РЎР‚РЎРѓР С‘РЎвЂљ ISO-РЎРѓРЎвЂљРЎР‚Р С•Р С”РЎС“ Р Р† datetime, Р С•Р В±Р ВµРЎРѓР С—Р ВµРЎвЂЎР С‘Р Р†Р В°РЎРЏ timezone-aware РЎР‚Р ВµР В·РЎС“Р В»РЎРЉРЎвЂљР В°РЎвЂљ.
+        Р вЂўРЎРѓР В»Р С‘ РЎРѓРЎвЂљРЎР‚Р С•Р С”Р В° Р В±Р ВµР В· РЎвЂљР В°Р в„–Р СР В·Р С•Р Р…РЎвЂ№ РІР‚вЂќ Р Т‘Р С•Р В±Р В°Р Р†Р В»РЎРЏР ВµРЎвЂљ UTC.
         """
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
-            # Naive datetime считаем за UTC для консистентности
+            # Naive datetime РЎРѓРЎвЂЎР С‘РЎвЂљР В°Р ВµР С Р В·Р В° UTC Р Т‘Р В»РЎРЏ Р С”Р С•Р Р…РЎРѓР С‘РЎРѓРЎвЂљР ВµР Р…РЎвЂљР Р…Р С•РЎРѓРЎвЂљР С‘
             return dt.replace(tzinfo=timezone.utc)
         return dt

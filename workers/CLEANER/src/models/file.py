@@ -91,8 +91,16 @@ class FileJob:
     def to_payload(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
+    def get_storage_dir_name(self) -> str:
+        return Path(self.original_filename).stem
+
     def get_base_path(self, base_dir: str = "/shared/files") -> Path:
-        return Path(base_dir) / self.file_id
+        base_dir_path = Path(base_dir)
+        preferred = base_dir_path / self.get_storage_dir_name()
+        legacy = base_dir_path / self.file_id
+        if legacy.exists() and not preferred.exists():
+            return legacy
+        return preferred
 
     def get_original_path(self, base_dir: str = "/shared/files") -> Path:
         return self.get_base_path(base_dir) / "original" / self.original_filename
