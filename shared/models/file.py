@@ -195,7 +195,7 @@ class FileJob:
         """Путь к входному файлу для модуля."""
         base = self.get_base_path(base_dir)
 
-        if module == "preprocess":
+        if module == "cleaner":
             return self.get_original_path(base_dir)
         elif module == "ocr":
             preprocessed = base / "preprocessed" / self.original_filename
@@ -254,9 +254,9 @@ class FileJob:
     def get_allowed_modules(self) -> List[str]:
         """Получить список модулей для этого типа файла."""
         routing = {
-            FileType.IMAGE: ["preprocess", "ocr", "llm"],
-            FileType.PDF: ["preprocess", "ocr", "llm"],
-            FileType.DOCUMENT: ["preprocess", "llm"],
+            FileType.IMAGE: ["cleaner", "ocr", "llm"],
+            FileType.PDF: ["cleaner", "ocr", "llm"],
+            FileType.DOCUMENT: ["cleaner", "llm"],
             FileType.TEXT: ["llm"],
             FileType.UNKNOWN: [],
         }

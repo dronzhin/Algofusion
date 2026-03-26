@@ -247,7 +247,7 @@ class FileMonitor:
                 file_type=file_type,
                 file_size=file_size,
                 status=FileStatus.UPLOADED,
-                current_module="preprocess",
+                current_module="cleaner",
                 export_to_1c=True,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
@@ -257,7 +257,7 @@ class FileMonitor:
             self.redis.set_file_status(file_id, job.to_dict())
 
             # Отправляем в очередь preprocess
-            self.redis.push_to_queue("files:preprocess", job.to_payload(), priority=job.priority)
+            self.redis.push_to_queue("files:cleaner", job.to_payload(), priority=job.priority)
 
             # Публикуем событие для UI
             self.redis.publish_event("files:events", {
