@@ -1,25 +1,8 @@
-# workers/ocr/requirements.txt
-
-# ==================== Core ====================
 redis==5.0.1
-python-dotenv==1.0.0
-
-# ==================== Изображения ====================
-Pillow==10.1.0
-numpy==1.26.2
-opencv-python-headless==4.8.1.78
-
-# ==================== OCR ====================
-pytesseract==0.3.10
-pdf2image==1.16.3
-
-# EasyOCR (опционально, раскомментировать если нужен)
-# easyocr==1.7.0
-
-# ==================== Утилиты ====================
-requests==2.31.0
-python-json-logger==2.0.7
-
-# ==================== Тестирование ====================
-pytest==7.4.3
-pytest-cov==4.1.0
+numpy==2.0.2
+opencv-python-headless==4.13.0.92
+Pillow==10.4.0
+PyMuPDF==1.27.1
+surya-ocr==0.17.1
+transformers==4.57.3
+tokenizers==0.22.2

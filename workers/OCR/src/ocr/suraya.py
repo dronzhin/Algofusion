@@ -1,10 +1,10 @@
 # workers/ocr/src/ocr/suraya.py
 """Surya OCR движок."""
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 import logging
 import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import fitz
 from PIL import Image
@@ -13,8 +13,8 @@ from surya.detection import DetectionPredictor
 from surya.foundation import FoundationPredictor
 from surya.recognition import RecognitionPredictor
 
-from base import BaseOCREngine, OCRResult
-from registry import OCREngineRegistry
+from src.ocr.base import BaseOCREngine, OCRResult
+from src.ocr.registry import OCREngineRegistry
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,8 @@
 # workers/ocr/src/ocr/registry.py
 """Реестр OCR движков."""
 
-from typing import Dict, Type, Optional
+from typing import Dict, Optional, Type
+
 from src.ocr.base import BaseOCREngine
 
 

@@ -91,26 +91,132 @@ services:
       - app-network
     restart: unless-stopped
 
-  # worker-layout:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/LAYOUT/Dockerfile
-  #   container_name: algofusion-worker-layout
-  #   volumes:
-  #     - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
-  #   environment:
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - LAYOUT_QUEUE=files:layout
-  #     - NEXT_QUEUE=files:ocr
-  #     - SHARED_FILES_DIR=/shared/files
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   networks:
-  #     - app-network
-  #   restart: unless-stopped
+  worker-layout:
+    build:
+      context: .
+      dockerfile: workers/LAYOUT/Dockerfile
+    container_name: algofusion-worker-layout
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LAYOUT_QUEUE=files:layout
+      - NEXT_QUEUE=files:ocr
+      - SHARED_FILES_DIR=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker-ocr:
+    build:
+      context: .
+      dockerfile: workers/OCR/Dockerfile
+    container_name: algofusion-worker-ocr
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OCR_QUEUE=files:ocr
+      - NEXT_QUEUE=files:parser
+      - SHARED_FILES_DIR=/shared/files
+      - OCR_ENGINE=surya
+      - OCR_LANG=rus+eng
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker-parser:
+    build:
+      context: .
+      dockerfile: workers/PARSER/Dockerfile
+    container_name: algofusion-worker-parser
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - PARSER_QUEUE=files:parser
+      - NEXT_QUEUE=files:normalizer
+      - SHARED_FILES_DIR=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker-normalizer:
+    build:
+      context: .
+      dockerfile: workers/NORMALIZER/Dockerfile
+    container_name: algofusion-worker-normalizer
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - NORMALIZER_QUEUE=files:normalizer
+      - NEXT_QUEUE=files:reconcile
+      - SHARED_FILES_DIR=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker-reconcile:
+    build:
+      context: .
+      dockerfile: workers/RECONCILE/Dockerfile
+    container_name: algofusion-worker-reconcile
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RECONCILE_QUEUE=files:reconcile
+      - NEXT_QUEUE=files:final_json
+      - SHARED_FILES_DIR=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  worker-final-json:
+    build:
+      context: .
+      dockerfile: workers/FINAL_JSON/Dockerfile
+    container_name: algofusion-worker-final-json
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - FINAL_JSON_QUEUE=files:final_json
+      - SHARED_FILES_DIR=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
 
 volumes:
   redis_data:

@@ -254,10 +254,10 @@ class FileJob:
     def get_allowed_modules(self) -> List[str]:
         """Получить список модулей для этого типа файла."""
         routing = {
-            FileType.IMAGE: ["cleaner", "ocr", "llm"],
-            FileType.PDF: ["cleaner", "ocr", "llm"],
-            FileType.DOCUMENT: ["cleaner", "llm"],
-            FileType.TEXT: ["llm"],
+            FileType.IMAGE: ["cleaner", "layout", "ocr", "parser", "normalizer", "reconcile", "final_json"],
+            FileType.PDF: ["cleaner", "layout", "ocr", "parser", "normalizer", "reconcile", "final_json"],
+            FileType.DOCUMENT: [],
+            FileType.TEXT: [],
             FileType.UNKNOWN: [],
         }
         return routing.get(self.file_type, [])
