@@ -118,6 +118,7 @@ services:
     container_name: algofusion-worker-ocr
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+      - ocr_model_cache:/root/.cache
     environment:
       - REDIS_URL=redis://redis:6379/0
       - OCR_QUEUE=files:ocr
@@ -219,6 +220,8 @@ services:
 
 volumes:
   redis_data:
+    driver: local
+  ocr_model_cache:
     driver: local
 
 networks:
