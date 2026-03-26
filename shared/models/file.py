@@ -59,6 +59,7 @@ class FileJob:
 
     file_id: str
     original_filename: str
+    storage_dir: Optional[str] = None
     file_type: FileType = FileType.UNKNOWN
     file_size: int = 0
     status: FileStatus = FileStatus.UPLOADED
@@ -115,6 +116,7 @@ class FileJob:
             return cls(
                 file_id=data.get("file_id", "unknown"),
                 original_filename=data.get("original_filename", "unknown"),
+                storage_dir=data.get("storage_dir"),
                 file_type=file_type,
                 file_size=data.get("file_size", 0),
                 status=status,
@@ -147,6 +149,7 @@ class FileJob:
         return {
             "file_id": self.file_id,
             "original_filename": self.original_filename,
+            "storage_dir": self.storage_dir,
             "file_type": self.file_type.value,
             "file_size": self.file_size,
             "status": self.status.value,
@@ -182,10 +185,11 @@ class FileJob:
     def to_payload(self) -> str:
         """Р РЋР ВµРЎР‚Р С‘Р В°Р В»Р С‘Р В·Р В°РЎвЂ Р С‘РЎРЏ Р Т‘Р В»РЎРЏ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘ Р Р† Р С•РЎвЂЎР ВµРЎР‚Р ВµР Т‘РЎРЉ."""
         return json.dumps(self.to_dict(), ensure_ascii=False)
-
     def get_storage_dir_name(self) -> str:
-        """Storage directory name for the file."""
+        if self.storage_dir:
+            return self.storage_dir
         return Path(self.original_filename).stem
+
 
     def get_base_path(self, base_dir: str = "/shared/files") -> Path:
         """Base directory for this file."""

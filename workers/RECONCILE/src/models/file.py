@@ -28,6 +28,7 @@ class FileStatus(str, Enum):
 class FileJob:
     file_id: str
     original_filename: str
+    storage_dir: Optional[str] = None
     file_type: FileType = FileType.UNKNOWN
     file_size: int = 0
     status: FileStatus = FileStatus.UPLOADED
@@ -52,6 +53,7 @@ class FileJob:
         return cls(
             file_id=data.get("file_id", "unknown"),
             original_filename=data.get("original_filename", "unknown"),
+            storage_dir=data.get("storage_dir"),
             file_type=FileType(data.get("file_type", "unknown")),
             file_size=data.get("file_size", 0),
             status=FileStatus(data.get("status", "uploaded")),
@@ -72,6 +74,7 @@ class FileJob:
         return {
             "file_id": self.file_id,
             "original_filename": self.original_filename,
+            "storage_dir": self.storage_dir,
             "file_type": self.file_type.value,
             "file_size": self.file_size,
             "status": self.status.value,
@@ -90,9 +93,11 @@ class FileJob:
 
     def to_payload(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False)
-
     def get_storage_dir_name(self) -> str:
+        if self.storage_dir:
+            return self.storage_dir
         return Path(self.original_filename).stem
+
 
     def get_base_path(self, base_dir: str = "/shared/files") -> Path:
         base_dir_path = Path(base_dir)

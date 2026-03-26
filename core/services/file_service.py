@@ -68,11 +68,15 @@ class FileService:
         except Exception as e:
             logger.error(f"Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В°РЎР‚РЎвЂ¦Р С‘Р Р†Р В°РЎвЂ Р С‘Р С‘ РЎвЂћР В°Р в„–Р В»Р В° {file_job.file_id}: {e}", exc_info=True)
             return False
-
-    def get_file_info(self, file_id: str, original_filename: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Р СџР С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С‘Р Вµ Р С‘Р Р…РЎвЂћР С•РЎР‚Р СР В°РЎвЂ Р С‘Р С‘ Р С• РЎвЂћР В°Р в„–Р В»Р Вµ."""
+    def get_file_info(self, file_id: str, original_filename: Optional[str] = None, storage_dir: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Р В РЎСџР В РЎвЂўР В Р’В»Р РЋРЎвЂњР РЋРІР‚РЋР В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ Р В РЎвЂР В Р вЂ¦Р РЋРІР‚С›Р В РЎвЂўР РЋР вЂљР В РЎВР В Р’В°Р РЋРІР‚В Р В РЎвЂР В РЎвЂ Р В РЎвЂў Р РЋРІР‚С›Р В Р’В°Р В РІвЂћвЂ“Р В Р’В»Р В Р’Вµ."""
         try:
-            base = self.base_dir / Path(original_filename).stem if original_filename else self.base_dir / file_id
+            if storage_dir:
+                base = self.base_dir / storage_dir
+            elif original_filename:
+                base = self.base_dir / Path(original_filename).stem
+            else:
+                base = self.base_dir / file_id
             if not base.exists():
                 base = self.base_dir / file_id
             if not base.exists():

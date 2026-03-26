@@ -205,7 +205,13 @@ class FileMonitor:
         """
         try:
             # РІвЂ С’ FIX: Р РЋР С•Р В·Р Т‘Р В°РЎвЂР С РЎРѓРЎвЂљРЎР‚РЎС“Р С”РЎвЂљРЎС“РЎР‚РЎС“ РЎРѓ РЎРЏР Р†Р Р…РЎвЂ№Р СР С‘ Р С—РЎР‚Р В°Р Р†Р В°Р СР С‘
-            base_dir = self.shared_path / Path(file_path.name).stem
+            stem = Path(file_path.name).stem
+            storage_dir = stem
+            suffix = 2
+            while (self.shared_path / storage_dir).exists():
+                storage_dir = f"{stem}__{suffix}"
+                suffix += 1
+            base_dir = self.shared_path / storage_dir
             original_dir = base_dir / "original"
             safe_mkdir(original_dir, mode=0o755)
 
@@ -234,6 +240,7 @@ class FileMonitor:
             job = FileJob(
                 file_id=file_id,
                 original_filename=file_path.name,
+                storage_dir=storage_dir,
                 file_type=file_type,
                 file_size=file_size,
                 status=FileStatus.UPLOADED,

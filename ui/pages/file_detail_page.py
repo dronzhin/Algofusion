@@ -248,7 +248,7 @@ def _render_file_structure(file_id: str, file_service) -> None:
         return
 
     with error_handler("file_structure", "РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ СЃС‚СЂСѓРєС‚СѓСЂС‹ С„Р°Р№Р»РѕРІ"):
-        file_info = file_service.get_file_info(file_id, file_data.get("original_filename"))
+        file_info = file_service.get_file_info(file_id, file_data.get("original_filename"), file_data.get("storage_dir"))
 
         if not file_info:
             render_empty_state("вљ пёЏ РРЅС„РѕСЂРјР°С†РёСЏ Рѕ С„Р°Р№Р»Рµ РЅРµ РЅР°Р№РґРµРЅР° РЅР° РґРёСЃРєРµ")
