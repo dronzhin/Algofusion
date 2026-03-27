@@ -6,12 +6,14 @@
 
 import shutil
 import zipfile
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone  # ← Добавили timezone
+from datetime import datetime, timezone
+
 from shared.models.file import FileJob
 from shared.utils.logger import setup_logger
-from shared.utils.helpers import safe_mkdir
+from shared.utils.helpers import safe_mkdir, format_file_size, format_datetime
 
 logger = setup_logger("core.services.file_service")
 
@@ -28,7 +30,6 @@ class FileService:
         """Создание структуры папок для файла."""
         try:
             base = file_job.get_base_path(str(self.base_dir))
-
             directories = [
                 base / "original",
                 base / "preprocessed",
@@ -37,10 +38,8 @@ class FileService:
                 base / "export",
                 base / "archive"
             ]
-
             for dir_path in directories:
                 safe_mkdir(dir_path)
-
             logger.info(f"Структура папок создана для файла {file_job.file_id}")
             return True
         except Exception as e:
@@ -52,8 +51,6 @@ class FileService:
         try:
             base = file_job.get_base_path(str(self.base_dir))
             archive_path = file_job.get_archive_path(str(self.base_dir))
-
-            # Создаём ZIP архив
             with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for folder in ["original", "preprocessed", "ocr", "llm", "export"]:
                     folder_path = base / folder
@@ -62,7 +59,6 @@ class FileService:
                             if file_path.is_file():
                                 arcname = file_path.relative_to(base)
                                 zipf.write(file_path, arcname)
-
             logger.info(f"Файл {file_job.file_id} архивирован: {archive_path}")
             return True
         except Exception as e:
@@ -75,13 +71,7 @@ class FileService:
             base = self.base_dir / file_id
             if not base.exists():
                 return None
-
-            info = {
-                "file_id": file_id,
-                "base_path": str(base),
-                "directories": {}
-            }
-
+            info = {"file_id": file_id, "base_path": str(base), "directories": {}}
             for folder in ["original", "preprocessed", "ocr", "llm", "export", "archive"]:
                 folder_path = base / folder
                 if folder_path.exists():
@@ -91,7 +81,6 @@ class FileService:
                         "file_count": len([f for f in files if f.is_file()]),
                         "files": [f.name for f in files if f.is_file()]
                     }
-
             return info
         except Exception as e:
             logger.error(f"Ошибка получения информации о файле {file_id}: {e}", exc_info=True)
@@ -101,23 +90,15 @@ class FileService:
         """Очистка старых файлов."""
         try:
             cleaned = 0
-            # ← Используем timezone-aware datetime
             now = datetime.now(timezone.utc)
-
             for file_dir in self.base_dir.iterdir():
                 if file_dir.is_dir() and file_dir.name != "archive":
-                    # Получаем время создания с таймзоной
-                    created = datetime.fromtimestamp(
-                        file_dir.stat().st_ctime,
-                        tz=timezone.utc  # ← Указываем таймзону явно
-                    )
+                    created = datetime.fromtimestamp(file_dir.stat().st_ctime, tz=timezone.utc)
                     age = (now - created).days
-
                     if age > max_age_days:
                         shutil.rmtree(file_dir)
                         cleaned += 1
                         logger.info(f"Удалён старый файл: {file_dir.name} ({age} дней)")
-
             logger.info(f"Очистка завершена: удалено {cleaned} файлов")
             return cleaned
         except Exception as e:
@@ -131,3 +112,125 @@ class FileService:
         except Exception as e:
             logger.error(f"Ошибка получения списка файлов: {e}")
             return []
+
+    def get_download_path(self, file_id: str, file_type: str = "original") -> Optional[Path]:
+        """Возвращает путь к файлу для скачивания."""
+        try:
+            base = self.base_dir / file_id
+            folder_map = {
+                "original": "original", "preprocessed": "preprocessed",
+                "ocr": "ocr", "llm": "llm", "export": "export"
+            }
+            folder = folder_map.get(file_type, "original")
+            folder_path = base / folder
+            if folder_path.exists():
+                files = [f for f in folder_path.rglob("*") if f.is_file()]
+                return files[0] if files else None
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка получения пути для скачивания: {e}")
+            return None
+
+    def get_file_content(self, file_id: str, file_type: str = "original") -> Optional[bytes]:
+        """Читает содержимое файла для предпросмотра (макс. 15 МБ)."""
+        try:
+            path = self.get_download_path(file_id, file_type)
+            if path and path.exists():
+                max_size = 1024 * 1024 * 15
+                if path.stat().st_size > max_size:
+                    logger.warning(f"Файл слишком большой для предпросмотра: {path}")
+                    return None
+                return path.read_bytes()
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка чтения файла: {e}")
+            return None
+
+    def get_text_preview(self, file_id: str, file_type: str = "ocr", max_lines: int = 50) -> Optional[str]:
+        """Возвращает текстовый превью файла."""
+        try:
+            content = self.get_file_content(file_id, file_type)
+            if content:
+                text = content.decode("utf-8", errors="replace")
+                lines = text.split("\n")[:max_lines]
+                return "\n".join(lines)
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка получения текстового превью: {e}")
+            return None
+
+    def get_file_metadata(self, file_id: str, file_type: str = "original") -> Optional[Dict[str, Any]]:
+        """Возвращает метаданные файла."""
+        try:
+            path = self.get_download_path(file_id, file_type)
+            if path and path.exists():
+                stat = path.stat()
+                return {
+                    "filename": path.name,
+                    "size_bytes": stat.st_size,
+                    "size_human": format_file_size(stat.st_size),
+                    "created": format_datetime(datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)),
+                    "modified": format_datetime(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)),  # ← FIX: st_mtime
+                    "mime_type": self._guess_mime_type(path),
+                    "is_image": path.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"],
+                    "is_text": path.suffix.lower() in [".txt", ".md", ".json", ".csv", ".xml"],
+                    "is_pdf": path.suffix.lower() == ".pdf",
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка получения метаданных: {e}")
+            return None
+
+    def delete_file(self, file_id: str, force: bool = False) -> bool:
+        """Удаляет файл и его структуру."""
+        try:
+            base = self.base_dir / file_id
+            if not base.exists():
+                logger.warning(f"Файл не найден для удаления: {file_id}")
+                return False
+            if not force:
+                status_file = base / "status.json"
+                if status_file.exists():
+                    with open(status_file) as f:
+                        status = json.load(f).get("status", "")
+                    if status in ["processing", "uploaded"]:
+                        logger.warning(f"Файл {file_id} в обработке, удаление отклонено")
+                        return False
+            shutil.rmtree(base)
+            logger.info(f"Файл удалён: {file_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка удаления файла {file_id}: {e}")
+            return False
+
+    def retry_processing(self, file_id: str) -> bool:
+        """Сбрасывает статус файла для повторной обработки."""
+        try:
+            base = self.base_dir / file_id
+            status_file = base / "status.json"
+            if status_file.exists():
+                with open(status_file, "r") as f:
+                    data = json.load(f)
+                data["status"] = "uploaded"
+                data["retry_count"] = data.get("retry_count", 0) + 1
+                data["updated_at"] = datetime.now(timezone.utc).isoformat()
+                with open(status_file, "w") as f:
+                    json.dump(data, f, indent=2)
+                logger.info(f"Файл {file_id} подготовлен к повторной обработке")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка подготовки к повторной обработке {file_id}: {e}")
+            return False
+
+    @staticmethod
+    def _guess_mime_type(path: Path) -> str:
+        """Определяет MIME-тип по расширению."""
+        mime_types = {
+            ".pdf": "application/pdf", ".txt": "text/plain",
+            ".json": "application/json", ".csv": "text/csv",
+            ".xml": "application/xml", ".png": "image/png",
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".webp": "image/webp",
+        }
+        return mime_types.get(path.suffix.lower(), "application/octet-stream")

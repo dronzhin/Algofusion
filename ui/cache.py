@@ -1,107 +1,60 @@
 # ui/cache.py
 """
 Слой кэширования для Streamlit UI.
-Использует @st.cache_data и @st.cache_resource для оптимизации.
 """
 
 import streamlit as st
-import hashlib
-import json
-import time
-from typing import Any, Dict, List, Optional, Callable, Union, TYPE_CHECKING
-from datetime import datetime, timedelta
-from functools import wraps
+from typing import Any, Dict, List, Optional
 from shared.utils.logger import setup_logger
-
-# Для типизации без циклических импортов
-if TYPE_CHECKING:
-    from core.services.redis_client import RedisClient
 
 logger = setup_logger("ui.cache")
 
+# ============================================================================
+# 📦 КОНФИГУРАЦИЯ TTL
+# ============================================================================
+
+CACHE_TTL = {
+    "file_stats": 60,          # 1 минута (статистика)
+    "files_list": 30,          # 30 секунд (файлы — автообновление)
+    "redis_connection": 86400, # 24 часа (подключение)
+}
+
 
 # ============================================================================
-# STREAMLIT CACHE DECORATORS
+# 🔗 CACHE DECORATORS
 # ============================================================================
 
-@st.cache_resource(ttl=3600)  # 1 час
+@st.cache_resource(ttl=CACHE_TTL["redis_connection"])
 def get_redis_client_cached():
-    """
-    Кэшированный Redis клиент.
-    Использует @st.cache_resource для тяжелых объектов подключения.
-    """
+    """Кэшированное подключение к Redis."""
     from core.services.redis_client import get_redis_client
-    logger.info("Создание нового Redis подключения (кэшировано)")
+    logger.info("🔌 Создание нового Redis подключения (кэшировано)")
     return get_redis_client()
 
 
-@st.cache_data(ttl=60)  # 60 секунд
-def get_files_from_redis_cached(
-    _redis_client: Union['RedisClient', List[Dict[str, Any]]],
-    _cache_key: str = "default"  # ← Параметр для инвалидации (не хэшируется)
-) -> List[Dict[str, Any]]:
-    """
-    Кэшированное получение списка файлов из Redis.
-
-    Args:
-        _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
-        _cache_key: Уникальный ключ для принудительной инвалидации кэша
-
-    Returns:
-        List[Dict]: Список файлов из Redis
-    """
-    try:
-        # ← Защитная проверка: если передали список — возвращаем его
-        if isinstance(_redis_client, list):
-            return _redis_client
-
-        # Если это клиент — получаем файлы
-        if hasattr(_redis_client, 'get_all_files'):
-            files = _redis_client.get_all_files()
-            logger.debug(f"Загружено {len(files)} файлов из Redis (кэш: {_cache_key})")
-            return files
-        else:
-            logger.warning(f"Неожиданный тип _redis_client: {type(_redis_client)}")
-            return []
-
-    except Exception as e:
-        logger.error(f"Ошибка получения файлов: {e}")
-        return []
-
-
-@st.cache_data(ttl=300)  # 5 минут
+@st.cache_data(ttl=CACHE_TTL["file_stats"])
 def get_file_stats_cached(
-    _redis_client: Union['RedisClient', List[Dict[str, Any]]],
-    _cache_key: str = "default"  # ← Параметр для инвалидации
+    _redis_client: Any,
+    _cache_key: str = "default"
 ) -> Dict[str, Any]:
-    """
-    Кэшированная статистика файлов.
-
-    Args:
-        _redis_client: RedisClient или список файлов (подчёркивание = не хэшировать)
-        _cache_key: Уникальный ключ для принудительной инвалидации кэша
-
-    Returns:
-        Dict: Статистика файлов
-    """
+    """Статистика файлов (кэш 1 минута)."""
     try:
-        # ← Защитная проверка: если передали список — используем его
         if isinstance(_redis_client, list):
             files = _redis_client
         elif hasattr(_redis_client, 'get_all_files'):
             files = _redis_client.get_all_files()
         else:
-            logger.warning(f"Неожиданный тип _redis_client: {type(_redis_client)}")
-            files = []
+            return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
 
         total = len(files)
+        if total == 0:
+            return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
 
         statuses = [f.get("status", "unknown") for f in files]
         completed = statuses.count("completed")
         processing = statuses.count("processing")
         failed = statuses.count("failed")
         exported = statuses.count("exported")
-
         success_rate = f"{(completed / total * 100):.1f}%" if total > 0 else "0%"
 
         return {
@@ -113,43 +66,31 @@ def get_file_stats_cached(
             "success_rate": success_rate
         }
     except Exception as e:
-        logger.error(f"Ошибка получения статистики: {e}")
+        logger.error(f"❌ Ошибка получения статистики: {e}")
         return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
 
 
-@st.cache_data(ttl=600)  # 10 минут
-def get_file_structure_cached(
-    _file_service: Any,  # Union['FileService', Dict]
-    file_id: str,
-    _cache_key: str = "default"  # ← Параметр для инвалидации
-) -> Optional[Dict[str, Any]]:
-    """
-    Кэшированная структура файлов.
-
-    Args:
-        _file_service: FileService (подчёркивание = не хэшировать)
-        file_id: ID файла
-        _cache_key: Уникальный ключ для принудительной инвалидации кэша
-
-    Returns:
-        Dict или None: Информация о файле
-    """
+@st.cache_data(ttl=CACHE_TTL["files_list"])
+def get_files_from_redis_cached(
+    _redis_client: Any,
+    _cache_key: str = "default"
+) -> List[Dict[str, Any]]:
+    """Список файлов (кэш 30 секунд, автообновление)."""
     try:
-        # ← Защитная проверка типа
-        if hasattr(_file_service, 'get_file_info'):
-            return _file_service.get_file_info(file_id)
-        elif isinstance(_file_service, dict):
-            return _file_service
-        else:
-            logger.warning(f"Неожиданный тип _file_service: {type(_file_service)}")
-            return None
+        if isinstance(_redis_client, list):
+            return _redis_client
+        if hasattr(_redis_client, 'get_all_files'):
+            files = _redis_client.get_all_files()
+            logger.debug(f"📦 Загружено {len(files)} файлов из Redis (ключ: {_cache_key})")
+            return files
+        return []
     except Exception as e:
-        logger.error(f"Ошибка получения структуры файла {file_id}: {e}")
-        return None
+        logger.error(f"❌ Ошибка получения файлов: {e}")
+        return []
 
 
 # ============================================================================
-# CUSTOM CACHE MANAGER
+# 🧹 CACHE MANAGER
 # ============================================================================
 
 class CacheManager:
@@ -160,64 +101,19 @@ class CacheManager:
         """Очистка всего кэша Streamlit."""
         st.cache_data.clear()
         st.cache_resource.clear()
-        logger.info("Весь кэш очищен")
+        logger.info("🗑️ Весь кэш очищен")
 
     @staticmethod
     def clear_data_cache():
         """Очистка только data кэша."""
         st.cache_data.clear()
-        logger.info("Data кэш очищен")
+        logger.info("🗑️ Data кэш очищен")
 
     @staticmethod
-    def invalidate_function(func: Callable):
+    def invalidate_function(func):
         """Инвалидация кэша конкретной функции."""
         try:
             func.clear()
-            logger.info(f"Кэш функции {func.__name__} очищен")
+            logger.info(f"🗑️ Кэш функции {func.__name__} очищен")
         except Exception as e:
-            logger.error(f"Ошибка очистки кэша: {e}")
-
-
-# ============================================================================
-# CACHE KEY GENERATOR
-# ============================================================================
-
-def generate_cache_key(*args, **kwargs) -> str:
-    """
-    Генерация уникального ключа кэша из аргументов.
-
-    Returns:
-        str: MD5-хэш первых 12 символов
-    """
-    key_data = {
-        "args": [str(arg) for arg in args],
-        "kwargs": kwargs,
-        "timestamp": datetime.now().isoformat()[:16]  # Минутная точность
-    }
-    key_string = json.dumps(key_data, sort_keys=True)
-    return hashlib.md5(key_string.encode()).hexdigest()[:12]
-
-
-# ============================================================================
-# PERFORMANCE MONITORING
-# ============================================================================
-
-def cache_monitor(func: Callable) -> Callable:
-    """
-    Декоратор для мониторинга производительности кэшированных функций.
-    """
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = datetime.now()
-        result = func(*args, **kwargs)
-        duration = (datetime.now() - start).total_seconds() * 1000  # ms
-
-        if duration > 100:  # Предупреждение если > 100ms
-            logger.warning(f"Медленная функция {func.__name__}: {duration:.2f}ms")
-        else:
-            logger.debug(f"Функция {func.__name__}: {duration:.2f}ms")
-
-        return result
-
-    return wrapper
+            logger.error(f"❌ Ошибка очистки кэша: {e}")
