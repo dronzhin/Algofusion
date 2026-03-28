@@ -19,10 +19,12 @@ def render_log_viewer(
         title: str = "📋 Журнал событий",
         show_pending_warning: bool = False,
         on_clear: Optional[Callable] = None,
-        limit: int = None
+        limit: int = None,
+        compact_mode: bool = False  # ← новый параметр
 ) -> None:
     """Отображает список логов с опциями."""
     try:
+        # Создаём контейнер с границей
         with st.container(border=True):
             # Заголовок + кнопка очистки
             header_col, action_col = st.columns([4, 1])
@@ -42,18 +44,44 @@ def render_log_viewer(
                 render_empty_state("Логи пока пустые")
                 return
 
+            # 🔹 Компактный режим: ограничиваем высоту через CSS
+            if compact_mode:
+                st.markdown("""
+                <style>
+                    .compact-logs {
+                        max-height: 280px;
+                        overflow-y: auto;
+                        padding-right: 4px;
+                        margin: -0.5rem -1rem -1rem -1rem;
+                        padding: 0.5rem 1rem 1rem 1rem;
+                    }
+                    .compact-logs::-webkit-scrollbar {
+                        width: 6px;
+                    }
+                    .compact-logs::-webkit-scrollbar-thumb {
+                        background: #ccc;
+                        border-radius: 3px;
+                    }
+                </style>
+                <div class="compact-logs">
+                """, unsafe_allow_html=True)
+
             # Рендеринг записей
-            display_limit = limit or UI_CONFIG["max_logs_display"]
+            display_limit = limit or (10 if compact_mode else UI_CONFIG["max_logs_display"])
             for log in logs[-display_limit:]:
                 _render_log_line(log)
 
-            # Футер
+            # 🔹 Закрываем div только в компактном режиме
+            if compact_mode:
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # Футер со статистикой
             if len(logs) > display_limit:
                 st.caption(f"Показано последних {display_limit} из {len(logs)}")
 
     except Exception as e:
-        logger.error(f"Ошибка рендеринга логов: {e}")
-        st.warning("⚠️ Не удалось отобразить журнал")
+        logger.error(f"Ошибка рендеринга логов: {e}", exc_info=True)
+        st.warning("⚠️ Не удалось отобразить журнал событий")
 
 
 def _render_log_line(log: Dict[str, str]) -> None:

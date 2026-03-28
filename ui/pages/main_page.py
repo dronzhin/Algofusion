@@ -20,11 +20,12 @@ from ui.components.refresh_settings import render_refresh_settings, get_refresh_
 
 logger = setup_logger("ui.pages.main_page")
 
+
 def render_main_page(session: SessionState) -> None:
     """Оркестрация главной страницы."""
     logger.info("📄 Рендеринг главной страницы")
 
-    # Сначала рендерим сайдбар (важно: st.sidebar глобален!)
+    # Сначала рендерим сайдбар
     render_sidebar(session)
 
     # Проверка инициализации сервисов
@@ -38,7 +39,7 @@ def render_main_page(session: SessionState) -> None:
         st.error("❌ FileService не инициализирован")
         return
 
-    # 🔁 Автообновление (settings берём из session)
+    # 🔁 Автообновление
     auto_refresh_enabled, auto_refresh_interval_sec = get_refresh_config(session)
 
     if auto_refresh_enabled:
@@ -50,34 +51,47 @@ def render_main_page(session: SessionState) -> None:
             debounce=True
         )
 
-    # ЗОНА 1: Статистика
-    st.subheader("📈 Статистика обработки")
-    stats = get_file_stats_cached(redis_client, _cache_key=session.cache_buster)
-    render_stats_panel(stats)
-    st.divider()
+    # ========================================================================
+    # 🔝 ВЕРХНЯЯ ПАНЕЛЬ: Логи + Статистика (две колонки)
+    # ========================================================================
 
-    # ЗОНА 2: Журнал событий
-    logs = session.get_logs(limit=20)
-    render_log_viewer(
-        logs=logs,
-        show_pending_warning=session.pending_events,
-        on_clear=session.clear_logs
-    )
-    st.divider()
+    # Создаём две колонки: логи шире (3 части), статистика уже (2 части)
+    log_col, stats_col = st.columns([3, 2], gap="medium")
 
-    # ЗОНА 3: Реестр файлов
+    with log_col:
+        # 📋 Журнал событий
+        logs = session.get_logs(limit=10)  # ← меньше записей, чтобы не растягивать
+        render_log_viewer(
+            logs=logs,
+            title="📋 Журнал событий",
+            show_pending_warning=session.pending_events,
+            on_clear=session.clear_logs,
+            limit=10  # ← компактный режим
+        )
+
+    with stats_col:
+        # 📈 Статистика обработки
+        stats = get_file_stats_cached(redis_client, _cache_key=session.cache_buster)
+        render_stats_panel(stats, show_progress=True)
+
+    st.divider()  # Разделитель между верхней панелью и списком файлов
+
+    # ========================================================================
+    # 📄 НИЖНЯЯ ЧАСТЬ: Реестр файлов
+    # ========================================================================
     st.subheader("📄 Реестр файлов")
 
+    # Панель управления списком
     col1, col2 = st.columns([4, 1])
     with col1:
         status_text = "🟢 Авто" if auto_refresh_enabled else "⏸️ Пауза"
-        st.caption(f"🔄 {status_text} | {auto_refresh_interval_sec:.1f}с | Кэш: 30с")
+        st.caption(f"🔄 {status_text} | {auto_refresh_interval_sec:.0f}с | Кэш: 30с")
     with col2:
         if st.button("🔄 Обновить", key="refresh_files_btn", use_container_width=True, type="primary"):
             session.invalidate_cache()
             st.rerun()
 
-    # Callbacks
+    # Callbacks для интерактивных действий
     def _on_detail(file_id: str):
         session.navigate("detail", file_id=file_id)
         st.rerun()
@@ -94,6 +108,7 @@ def render_main_page(session: SessionState) -> None:
             st.success("✅ Файл удалён")
             st.rerun()
 
+    # Загрузка и рендер списка файлов
     files = get_files_from_redis_cached(redis_client, _cache_key=session.cache_buster)
     render_file_list(
         files=files,

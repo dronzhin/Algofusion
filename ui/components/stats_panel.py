@@ -13,8 +13,11 @@ from ui.utils.components import render_metric_card
 logger = setup_logger("ui.components.stats_panel")
 
 
-def render_stats_panel(stats: Dict[str, Any], show_progress: bool = True) -> None:
-    """Рендерит панель с метриками обработки."""
+def render_stats_panel(stats: Dict[str, Any], show_progress: bool = True, compact: bool = False) -> None:
+    if compact:
+        # Уменьшаем отступы для размещения в колонке
+        st.markdown("<style>.stMetric {margin-bottom: 0.5rem;}</style>", unsafe_allow_html=True)
+
     try:
         # 5 колонок для основных метрик
         m1, m2, m3, m4, m5 = st.columns(5)
