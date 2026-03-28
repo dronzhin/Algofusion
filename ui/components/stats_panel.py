@@ -1,71 +1,44 @@
+# ui/components/stats_panel.py
 """
 Компонент: Панель статистики.
+Использует render_metric_card из components.py
 """
 
 import streamlit as st
 from typing import Dict, Any
 
 from shared.utils.logger import setup_logger
-from ui.utils.formatters import render_status_badge_safe
+from ui.utils.components import render_metric_card
 
 logger = setup_logger("ui.components.stats_panel")
 
 
-def render_stats_panel(stats: Dict[str, Any]) -> None:
-    """Рендерит панель с метриками."""
+def render_stats_panel(stats: Dict[str, Any], show_progress: bool = True) -> None:
+    """Рендерит панель с метриками обработки."""
     try:
-        m1, m2, m3, m4 = st.columns(4)
+        # 5 колонок для основных метрик
+        m1, m2, m3, m4, m5 = st.columns(5)
 
         with m1:
-            st.metric(
-                label="Всего файлов",
-                value=stats.get("total", 0),
-                delta=None
-            )
-
+            render_metric_card("📁 Всего", stats.get("total", 0))
         with m2:
-            # ← Улучшенное отображение: добавляем бейдж успеха
-            success_rate = stats.get("success_rate", "0%")
-            st.metric(
-                label="Успешно",
-                value=stats.get("completed", 0),
-                delta=f"{success_rate}" if success_rate != "0%" else None,
-                delta_color="normal" if float(success_rate.rstrip("%")) >= 80 else "inverse"
-            )
-
+            render_metric_card("✅ Завершено", stats.get("completed", 0))
         with m3:
-            st.metric(
-                label="В обработке",
-                value=stats.get("processing", 0),
-                delta=None,
-                delta_color="normal"
-            )
-
+            render_metric_card("⏳ В обработке", stats.get("processing", 0))
         with m4:
-            st.metric(
-                label="Ошибки",
-                value=stats.get("failed", 0),
-                delta=None,
-                delta_color="inverse"
-            )
+            render_metric_card("❌ Ошибки", stats.get("failed", 0), delta_color="inverse")
+        with m5:
+            render_metric_card("📤 Экспорт", stats.get("exported", 0))
 
-        # Дополнительная строка с экспортом
-        st.divider()
-        e1, e2 = st.columns(2)
-
-        with e1:
-            st.metric(
-                label="Экспортировано в 1С",
-                value=stats.get("exported", 0),
-                delta=f"{stats.get('export_rate', '0%')}" if stats.get('export_rate') else None
-            )
-
-        with e2:
-            st.metric(
-                label="Ожидают экспорта",
-                value=stats.get("export_pending", 0),
-                delta=None
-            )
+        # Прогресс-бар успешности
+        if show_progress:
+            success_rate = stats.get("success_rate", "0%")
+            try:
+                rate_value = float(success_rate.replace("%", ""))
+                st.progress(rate_value / 100)
+                st.caption(f"✨ Успешность: {success_rate}")
+            except (ValueError, TypeError):
+                st.caption(f"✨ Успешность: {success_rate}")
 
     except Exception as e:
         logger.error(f"Ошибка рендеринга статистики: {e}")

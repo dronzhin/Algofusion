@@ -24,11 +24,7 @@ st.set_page_config(
     page_icon="📂",
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://github.com/algofusion',
-        'Report a bug': 'https://github.com/algofusion/issues',
-        'About': "# Algofusion File Processor v0.1.0"
-    }
+    menu_items={}
 )
 
 # ============================================================================
@@ -88,6 +84,10 @@ def _process_redis_events(session) -> bool:
 def main():
     """Основная функция приложения."""
     logger.info("🚀 Приложение запущено")
+
+    # Скрыть стандартную навигацию Streamlit
+    from ui.utils.ui_hacks import hide_streamlit_navigation
+    hide_streamlit_navigation()
 
     # Инициализация состояния
     session = get_session_state()

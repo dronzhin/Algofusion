@@ -25,7 +25,7 @@ class Settings:
     external_monitor_path: str = "/external/incoming"
 
     # Monitor
-    monitor_interval: int = 30
+    monitor_interval: int = 5
 
     # Workers
     worker_type: str = "preprocess"
@@ -37,6 +37,14 @@ class Settings:
 
     # Logging
     log_level: str = "INFO"
+
+    # UI Auto-refresh defaults
+    ui_auto_refresh_enabled: bool = True
+    ui_auto_refresh_interval_sec: int = 5
+    ui_auto_refresh_min_sec: int = 5
+    ui_auto_refresh_max_sec: int = 60
+    app_version: str = "0.1.0"
+    environment: str = "development"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,7 +60,13 @@ class Settings:
             worker_timeout=int(os.getenv("WORKER_TIMEOUT", "300")),
             export_1c_enabled=os.getenv("EXPORT_1C_ENABLED", "false").lower() == "true",
             export_1c_endpoint=os.getenv("EXPORT_1C_ENDPOINT", ""),
-            log_level=os.getenv("LOG_LEVEL", "INFO")
+            log_level=os.getenv("LOG_LEVEL", "INFO"),
+            ui_auto_refresh_enabled=os.getenv("UI_AUTO_REFRESH_ENABLED", "true").lower() == "true",
+            ui_auto_refresh_interval_sec=int(os.getenv("UI_AUTO_REFRESH_INTERVAL_SEC", "5")),
+            ui_auto_refresh_min_sec=int(os.getenv("UI_AUTO_REFRESH_MIN_SEC", "5")),
+            ui_auto_refresh_max_sec=int(os.getenv("UI_AUTO_REFRESH_MAX_SEC", "60")),
+            app_version=os.getenv("APP_VERSION", "0.1.0"),
+            environment=os.getenv("ENVIRONMENT", "development")
         )
 
     def validate(self) -> bool:
@@ -61,9 +75,12 @@ class Settings:
 
         if not self.redis_host:
             errors.append("REDIS_HOST не установлен")
-
         if self.monitor_interval < 5:
             errors.append("MONITOR_INTERVAL должен быть >= 5 секунд")
+        if not (5 <= self.ui_auto_refresh_min_sec <= self.ui_auto_refresh_max_sec <= 300):
+            errors.append("UI_AUTO_REFRESH: MIN должен быть >=5, MAX <=300, MIN <= MAX")
+        if not (self.ui_auto_refresh_min_sec <= self.ui_auto_refresh_interval_sec <= self.ui_auto_refresh_max_sec):
+            errors.append("UI_AUTO_REFRESH_INTERVAL_SEC вне диапазона [MIN, MAX]")
 
         if errors:
             for error in errors:

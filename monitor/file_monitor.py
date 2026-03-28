@@ -222,14 +222,14 @@ class FileMonitor:
             # Копируем файл с сохранением метаданных
             dest_path = original_dir / file_path.name
 
-            # ← FIX: Проверка что файл ещё доступен перед копированием
+            # Проверка что файл ещё доступен перед копированием
             if not file_path.exists():
                 logger.warning(f"Файл исчез перед копированием: {file_path}")
                 return False
 
             shutil.copy2(file_path, dest_path)
 
-            # ← FIX: Явно устанавливаем права на скопированный файл
+            # Явно устанавливаем права на скопированный файл
             try:
                 os.chmod(dest_path, 0o644)  # Чтение для всех, запись для владельца
             except PermissionError:
@@ -296,7 +296,6 @@ class FileMonitor:
                 "type": "file_error",
                 "filename": filename,
                 "error": error,
-                # ← FIX: timezone-aware timestamp
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         except Exception as e:
