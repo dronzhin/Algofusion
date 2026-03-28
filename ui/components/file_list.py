@@ -21,12 +21,16 @@ logger = setup_logger("ui.components.file_list")
 
 
 def render_file_list(
-        files: List[Dict[str, Any]],
-        session_state: Any,
-        mode: Literal["table", "cards"] = "table",
-        on_detail: Optional[Callable[[str], None]] = None,
-        on_retry: Optional[Callable[[str], None]] = None,
-        on_delete: Optional[Callable[[str], None]] = None,
+    files: List[Dict[str, Any]],
+    session_state: Any,
+    mode: Literal["table", "cards"] = "table",
+    on_detail: Optional[Callable[[str], None]] = None,
+    on_retry: Optional[Callable[[str], None]] = None,
+    on_delete: Optional[Callable[[str], None]] = None,
+    # 🔹 НОВЫЕ ПАРАМЕТРЫ:
+    on_download_preprocessed: Optional[Callable[[str], None]] = None,
+    on_edit: Optional[Callable[[str], None]] = None,
+    on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Рендерит список файлов в выбранном режиме."""
     with error_handler("file_list", "Ошибка отображения списка файлов"):
@@ -40,8 +44,18 @@ def render_file_list(
         if mode == "table":
             _render_table_mode(files, session_state, on_detail)
         else:
-            _render_cards_mode(files, session_state, file_service, on_detail, on_retry, on_delete)
-
+            # 🔹 Прокидываем новые колбэки в режим карточек
+            _render_cards_mode(
+                files,
+                session_state,
+                file_service,
+                on_detail,
+                on_retry,
+                on_delete,
+                on_download_preprocessed,  # ← новый
+                on_edit,                   # ← новый
+                on_export                  # ← новый
+            )
 
 def _render_table_mode(
     files: List[Dict[str, Any]],
@@ -88,12 +102,16 @@ def _render_table_row(
 
 
 def _render_cards_mode(
-        files: List[Dict[str, Any]],
-        session_state: Any,
-        file_service: Optional[Any],  # ← оставляем для внутренней передачи
-        on_detail: Optional[Callable[[str], None]],
-        on_retry: Optional[Callable[[str], None]],
-        on_delete: Optional[Callable[[str], None]],
+    files: List[Dict[str, Any]],
+    session_state: Any,
+    file_service: Optional[Any],
+    on_detail: Optional[Callable[[str], None]],
+    on_retry: Optional[Callable[[str], None]],
+    on_delete: Optional[Callable[[str], None]],
+    # 🔹 НОВЫЕ ПАРАМЕТРЫ:
+    on_download_preprocessed: Optional[Callable[[str], None]] = None,
+    on_edit: Optional[Callable[[str], None]] = None,
+    on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Режим карточек с expanders."""
     from ui.components.file_preview import render_file_preview
@@ -101,21 +119,38 @@ def _render_cards_mode(
     st.caption(f"📄 Найдено файлов: {len(files)}")
 
     for idx, file in enumerate(files):
-        _render_file_card(file, idx, session_state, file_service, on_detail, on_retry, on_delete)
+        _render_file_card(
+            file,
+            idx,
+            session_state,
+            file_service,
+            on_detail,
+            on_retry,
+            on_delete,
+            on_download_preprocessed,  # ← новый
+            on_edit,                   # ← новый
+            on_export                  # ← новый
+        )
 
 
 def _render_file_card(
         file: Dict[str, Any],
         idx: int,
         session_state: Any,
-        file_service: Optional[Any],  # ← используется внутри
-        on_detail: Optional[Callable[[str], None]],
-        on_retry: Optional[Callable[[str], None]],
-        on_delete: Optional[Callable[[str], None]],
+        file_service: Optional[Any],
+        on_detail: Optional[Callable[[str], None]] = None,
+        on_retry: Optional[Callable[[str], None]] = None,
+        on_delete: Optional[Callable[[str], None]] = None,
+        on_download_preprocessed: Optional[Callable[[str], None]] = None,
+        on_edit: Optional[Callable[[str], None]] = None,
+        on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
-    """Карточка файла в режиме expanders."""
-    from ui.components.file_preview import render_file_preview
+    """
+    Компактная карточка файла.
 
+    Header: 📁 filename (слева) + статус (справа)
+    Content: ID, время, размер + 4 основные кнопки
+    """
     file_id = file.get("file_id", f"file_{idx}")
     filename = file.get("original_filename", "unknown")
     file_size = file.get("file_size", 0)
@@ -123,89 +158,133 @@ def _render_file_card(
     created_at = format_datetime_short(file.get("created_at"))
     size_formatted = format_file_size(file_size)
 
+    # 🔹 Иконка статуса для заголовка
     status_icon = {
         "uploaded": "📁", "processing": "⏳", "completed": "✅",
         "exported": "📤", "failed": "❌"
     }.get(status, "❓")
 
-    status_color = FILE_STATUS_CONFIG.get(status, FILE_STATUS_CONFIG["uploaded"])["color"]
+    # 🔹 Цвет бейджа статуса
+    status_config = FILE_STATUS_CONFIG.get(status, FILE_STATUS_CONFIG["uploaded"])
+    status_label = status_config["label"]
+    status_color = status_config["color"]
+    status_bg = status_config["bg"]
 
-    with st.expander(f"{status_icon} {truncate_filename(filename, 60)}", expanded=False):
-        # Шапка
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown(f"**📄 Файл:** `{filename}`")
-            st.caption(f"🆔 ID: `{file_id}`")
-        with col2:
-            st.caption(f"📅 Загружен: {created_at}")
-            st.caption(f"📦 Размер: {size_formatted}")
-        with col3:
-            render_status_badge_safe(status, col3)
+    # 🔹 Заголовок: название слева, статус справа
+    header_left, header_right = st.columns([4, 1], gap="small")
 
-        st.divider()
+    with header_left:
+        truncated_name = truncate_filename(filename, 50)
+        st.markdown(f"**{status_icon} {truncated_name}**")
 
-        # Кнопки действий
-        st.markdown("#### ⚙️ Действия")
-        col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(5)
+    with header_right:
+        badge_html = f"""
+        <span style="
+            background-color: {status_bg};
+            color: {status_color};
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 10px;
+            white-space: nowrap;
+        ">
+            {status_label}
+        </span>
+        """
+        st.markdown(badge_html, unsafe_allow_html=True)
 
-        with col_act1:
+    # 🔹 Expander с контентом (только основное)
+    with st.expander("📊 Детали", expanded=False):
+        # Информация о файле
+        info_col1, info_col2, info_col3 = st.columns(3, gap="small")
+        with info_col1:
+            st.caption("🆔 ID")
+            st.code(file_id[:12], language="text")
+        with info_col2:
+            st.caption("📅 Загружен")
+            st.write(f"`{created_at}`")
+        with info_col3:
+            st.caption("📦 Размер")
+            st.write(f"`{size_formatted}`")
+
+        # 🔹 4 основные кнопки с текстовыми labels
+        st.markdown("##### ⚙️ Действия")
+
+        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4, gap="small")
+
+        # Кнопка 1: Скачать оригинал
+        with btn_col1:
             if file_service:
-                download_path = file_service.get_download_path(file_id, "original")
-                if download_path and download_path.exists():
-                    with open(download_path, "rb") as f:
+                original_path = file_service.get_download_path(file_id, "original")
+                if original_path and original_path.exists():
+                    with open(original_path, "rb") as f:
                         st.download_button(
-                            label="📥", key=f"dl_{idx}", data=f.read(),
-                            file_name=filename, mime="application/octet-stream",
-                            help="Скачать оригинал"
+                            label="📥 Скачать оригинал",  # ← Текст + иконка
+                            data=f.read(),
+                            file_name=filename,
+                            mime="application/octet-stream",
+                            key=f"dl_orig_{idx}",
+                            use_container_width=True,
+                            help="Скачать исходный файл"
                         )
                 else:
-                    st.button("📥", key=f"dl_{idx}", disabled=True, help="Файл недоступен")
+                    st.button("📥 Скачать оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
             else:
-                st.button("📥", key=f"dl_{idx}", disabled=True)
+                st.button("📥 Скачать оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
 
-        with col_act2:
-            if st.button("👁️", key=f"view_{idx}", help="Предпросмотр"):
-                render_file_preview(file_service, file_id, filename)
-
-        with col_act3:
-            if st.button("📋", key=f"meta_{idx}", help="Метаданные"):
-                if file_service:
-                    metadata = file_service.get_file_metadata(file_id)
-                    if metadata:
-                        with st.expander("📊 Метаданные", expanded=True):
-                            for key, value in metadata.items():
-                                st.caption(f"**{key}**: {value}")
+        # Кнопка 2: Скачать предобработанный
+        with btn_col2:
+            if file_service:
+                preprocessed_path = file_service.get_download_path(file_id, "preprocessed")
+                if preprocessed_path and preprocessed_path.exists():
+                    with open(preprocessed_path, "rb") as f:
+                        st.download_button(
+                            label="📥 Скачать обр.",  # ← Короткий текст
+                            data=f.read(),
+                            file_name=f"preprocessed_{filename}",
+                            mime="application/octet-stream",
+                            key=f"dl_prep_{idx}",
+                            use_container_width=True,
+                            help="Скачать файл после обработки"
+                        )
                 else:
-                    st.warning("❌ Сервис файлов не доступен")
-
-        with col_act4:
-            if status == "failed" and on_retry:
-                if st.button("🔄", key=f"retry_{idx}", help="Повторить"):
-                    on_retry(file_id)
+                    st.button("📥 Скачать обр.", key=f"dl_prep_{idx}", disabled=True, use_container_width=True,
+                              help="Файл не готов")
             else:
-                st.button("🔄", key=f"retry_{idx}", disabled=True)
+                st.button("📥 Скачать обр.", key=f"dl_prep_{idx}", disabled=True, use_container_width=True)
 
-        with col_act5:
-            if on_delete:
-                if st.button("🗑️", key=f"del_{idx}", help="Удалить"):
-                    with st.popover("⚠️ Подтвердите"):
-                        st.warning(f"Удалить **{filename}**?")
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("✅ Да", key=f"del_yes_{idx}"):
-                                on_delete(file_id)
-                        with c2:
-                            if st.button("❌ Нет", key=f"del_no_{idx}"):
-                                pass
+        # Кнопка 3: Редактировать
+        with btn_col3:
+            if on_edit:
+                if st.button("✏️ Редактировать", key=f"edit_{idx}", use_container_width=True,
+                             help="Редактировать файл"):
+                    on_edit(file_id)
             else:
-                st.button("🗑️", key=f"del_{idx}", disabled=True)
+                st.button("✏️ Редактировать", key=f"edit_{idx}", disabled=True, use_container_width=True)
 
-        if st.button("🔍 Подробнее →", key=f"detail_{idx}", use_container_width=True):
-            if on_detail:
-                on_detail(file_id)
+        # Кнопка 4: Экспорт в 1С
+        with btn_col4:
+            if on_export:
+                export_status = file.get("export_status", "none")
+                export_disabled = (export_status in ("exporting", "success")) or (
+                            status not in ("completed", "exported"))
+
+                export_label = "📤 Экспорт в 1С"
+                if export_status == "success":
+                    export_label = "✅ Экспортировано"
+                elif export_status == "exporting":
+                    export_label = "🔄 В процессе"
+
+                if st.button(
+                        export_label,
+                        key=f"export_{idx}",
+                        use_container_width=True,
+                        disabled=export_disabled,
+                        help="Экспортировать в 1С" if not export_disabled else f"Статус: {export_status}"
+                ):
+                    on_export(file_id)
             else:
-                _default_navigate_to_detail(file_id, session_state)
-
+                st.button("📤 Экспорт в 1С", key=f"export_{idx}", disabled=True, use_container_width=True)
 
 def _default_navigate_to_detail(file_id: str, session_state: Any) -> None:
     """Дефолтная навигация (если callback не передан)."""
