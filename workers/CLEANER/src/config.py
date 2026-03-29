@@ -14,7 +14,7 @@ class Config:
 
     shared_files_dir: Path = field(default_factory=lambda: Path(os.getenv("SHARED_FILES_DIR", "/shared/files")))
 
-    default_dpi: int = field(default_factory=lambda: int(os.getenv("CLEANER_DPI", "300")))
+    default_dpi: int = field(default_factory=lambda: int(os.getenv("CLEANER_DPI", "200")))
     container_id: str = field(default_factory=lambda: os.getenv("CONTAINER_ID", "cleaner-worker"))
     service_name: str = field(default_factory=lambda: os.getenv("SERVICE_NAME", "cleaner-worker"))
     max_retries: int = field(default_factory=lambda: int(os.getenv("MAX_RETRIES", "3")))

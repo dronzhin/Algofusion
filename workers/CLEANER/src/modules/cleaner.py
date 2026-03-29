@@ -7,6 +7,7 @@ import time
 import cv2
 import numpy as np
 from pdf2image import convert_from_path
+from PIL import Image
 
 from src.config import config
 from src.logger import get_logger
@@ -78,7 +79,11 @@ class CleanerModule(BaseModule):
         for idx, page in enumerate(pages, start=1):
             rgb = np.array(page.convert("RGB"))
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            cleaned = clean_page_bgr_exact(bgr)
+            cleaned = clean_page_bgr_exact(
+                bgr,
+                source_dpi=int(self.config["dpi"]),
+                target_dpi=int(self.config["dpi"]),
+            )
             output_path = output_dir / f"{input_path.stem}_p{idx:02d}_clean.png"
             cv2.imwrite(str(output_path), cleaned)
             outputs.append(output_path)
@@ -88,37 +93,119 @@ class CleanerModule(BaseModule):
         img = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Cannot read image: {input_path}")
-        cleaned = clean_page_bgr_exact(img)
+        source_dpi = _read_image_dpi(input_path, fallback_dpi=int(self.config["dpi"]))
+        cleaned = clean_page_bgr_exact(
+            img,
+            source_dpi=source_dpi,
+            target_dpi=int(self.config["dpi"]),
+        )
         cv2.imwrite(str(output_path), cleaned)
         return output_path
 
 
-def deskew(gray: np.ndarray) -> np.ndarray:
-    thresh = cv2.adaptiveThreshold(
+def convert_dpi(input_img: Image.Image, from_dpi: int = 600, to_dpi: int = 200) -> Image.Image:
+    if from_dpi <= 0 or to_dpi <= 0 or from_dpi == to_dpi:
+        return input_img
+    scale = to_dpi / from_dpi
+    new_width = max(1, int(round(input_img.width * scale)))
+    new_height = max(1, int(round(input_img.height * scale)))
+    return input_img.resize((new_width, new_height), resample=Image.LANCZOS)
+
+
+def _read_image_dpi(input_path: Path, fallback_dpi: int) -> int:
+    try:
+        with Image.open(input_path) as img:
+            dpi = img.info.get("dpi")
+            if isinstance(dpi, tuple) and dpi:
+                value = int(round(float(dpi[0])))
+                if value > 0:
+                    return value
+            if isinstance(dpi, (int, float)) and dpi > 0:
+                return int(round(float(dpi)))
+    except Exception:
+        pass
+    return fallback_dpi
+
+
+def detect_skew_angle_by_hough_lines(
+    image: np.ndarray,
+    canny1: int = 50,
+    canny2: int = 150,
+    hough_threshold: int = 150,
+    min_line_length: int = 200,
+    max_line_gap: int = 20,
+    max_abs_angle: float = 20.0,
+) -> tuple[float, bool]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(gray, canny1, canny2, apertureSize=3)
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180 / 4,
+        threshold=hough_threshold,
+        minLineLength=min_line_length,
+        maxLineGap=max_line_gap,
+    )
+
+    angles: list[float] = []
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+            if abs(angle) <= max_abs_angle:
+                angles.append(angle)
+
+    if not angles:
+        return 0.0, False
+    return float(np.median(angles)), True
+
+
+def detect_skew_angle_by_text_contours(image: np.ndarray) -> tuple[float, bool]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    th = cv2.adaptiveThreshold(
         gray,
         255,
         cv2.ADAPTIVE_THRESH_MEAN_C,
         cv2.THRESH_BINARY_INV,
-        35,
-        7,
+        31,
+        15,
     )
-    # np.where returns (y, x), while minAreaRect expects points in (x, y).
-    coords = np.column_stack(np.where(thresh > 0))[:, ::-1]
-    if coords.shape[0] < 200:
-        return gray
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45:
-        angle = 90 + angle
-    if abs(angle) > 15:
-        logger.warning("Skipping deskew with suspicious angle: %.2f", angle)
-        return gray
+    angles: list[float] = []
+    for cnt in contours:
+        if cv2.contourArea(cnt) < 2000:
+            continue
+        rect = cv2.minAreaRect(cnt)
+        angle = float(rect[-1])
+        if angle < -45:
+            angle = 90 + angle
+        angles.append(angle)
 
-    h, w = gray.shape[:2]
+    if not angles:
+        return 0.0, False
+    return float(np.median(angles)), True
+
+
+def detect_skew_angle(image: np.ndarray) -> float:
+    angle, reliable = detect_skew_angle_by_hough_lines(image)
+    if reliable:
+        return angle
+    angle, reliable = detect_skew_angle_by_text_contours(image)
+    if reliable:
+        return angle
+    return 0.0
+
+
+def rotate_image_by_angle(image: np.ndarray, angle: float) -> np.ndarray:
+    h, w = image.shape[:2]
     center = (w // 2, h // 2)
     matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
     return cv2.warpAffine(
-        gray,
+        image,
         matrix,
         (w, h),
         flags=cv2.INTER_CUBIC,
@@ -126,63 +213,85 @@ def deskew(gray: np.ndarray) -> np.ndarray:
     )
 
 
-def _remove_small_components(mask: np.ndarray, min_area: int = 24) -> np.ndarray:
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    cleaned = np.zeros_like(mask)
-    for idx in range(1, num_labels):
-        if stats[idx, cv2.CC_STAT_AREA] >= min_area:
-            cleaned[labels == idx] = 255
-    return cleaned
+def safe_rotate_image(image_bgr: np.ndarray, max_abs_angle: float = 20.0) -> np.ndarray:
+    angle = detect_skew_angle(image_bgr)
+    if abs(angle) < 0.1:
+        return image_bgr
+    if abs(angle) > max_abs_angle:
+        logger.warning("Skipping rotate with suspicious angle: %.2f", angle)
+        return image_bgr
+    logger.info("Cleaner rotate angle: %.2f", angle)
+    return rotate_image_by_angle(image_bgr, angle)
 
 
-def clean_page_bgr_exact(img_bgr: np.ndarray) -> np.ndarray:
-    gray0 = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    scale = 2
-    gray = cv2.resize(gray0, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-    gray = deskew(gray)
+def preprocessing_stage_4_1(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img).copy()
+    rgb = arr[..., :3]
+    min_val = rgb.min(axis=2)
+    max_val = rgb.max(axis=2)
+    diff = max_val - min_val
+    mask = (diff >= 1) & (diff <= 11)
+    rgb[mask] = np.stack([min_val[mask], min_val[mask], min_val[mask]], axis=1)
+    arr[..., :3] = rgb
+    return Image.fromarray(arr)
 
-    text_mask = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
-        cv2.THRESH_BINARY_INV,
-        35,
-        7,
-    )
 
-    k = 60 * scale
-    kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1))
-    kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k))
-    h_lines = cv2.morphologyEx(text_mask, cv2.MORPH_OPEN, kernel_h)
-    v_lines = cv2.morphologyEx(text_mask, cv2.MORPH_OPEN, kernel_v)
-    table_mask = cv2.bitwise_or(h_lines, v_lines)
-    protect_mask = cv2.bitwise_or(text_mask, table_mask)
+def preprocessing_stage_4_2(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img).copy()
+    rgb = arr[..., :3]
+    min_val = rgb.min(axis=2)
+    max_val = rgb.max(axis=2)
+    diff = max_val - min_val
+    gray_value = ((min_val.astype(np.uint16) + max_val.astype(np.uint16)) // 2).astype(np.uint8)
+    mask = (diff >= 12) & (diff <= 32)
+    rgb[mask] = np.stack([gray_value[mask], gray_value[mask], gray_value[mask]], axis=1)
+    arr[..., :3] = rgb
+    return Image.fromarray(arr)
 
-    bg = cv2.GaussianBlur(gray, (81, 81), 0)
-    flat = cv2.divide(gray, bg, scale=255)
-    flat = cv2.normalize(flat, None, 0, 255, cv2.NORM_MINMAX)
 
-    foreground = cv2.adaptiveThreshold(
-        flat,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        31,
-        9,
-    )
-    foreground = cv2.bitwise_or(foreground, protect_mask)
-    foreground = cv2.morphologyEx(
-        foreground,
-        cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
-    )
-    foreground = _remove_small_components(foreground, min_area=24)
+def preprocessing_stage_4_3(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img).copy()
+    rgb = arr[..., :3]
+    min_val = rgb.min(axis=2)
+    max_val = rgb.max(axis=2)
+    diff = max_val - min_val
+    mask = (diff >= 33) & (diff <= 255)
+    rgb[mask] = np.stack([max_val[mask], max_val[mask], max_val[mask]], axis=1)
+    arr[..., :3] = rgb
+    return Image.fromarray(arr)
 
-    restored = np.full_like(flat, 255)
-    restored[foreground > 0] = flat[foreground > 0]
-    restored = cv2.GaussianBlur(restored, (3, 3), 0)
-    return cv2.resize(
-        restored,
-        (gray0.shape[1], gray0.shape[0]),
-        interpolation=cv2.INTER_AREA,
-    )
+
+def preprocessing_stage_5_2_binarization(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img.convert("L"))
+    result = arr.copy()
+    result[result < 96] = 0
+    result[(result >= 96) & (result <= 128)] = 128
+    result[result > 128] = 255
+    result = cv2.medianBlur(result.astype(np.uint8), 3)
+    result = cv2.medianBlur(result, 3)
+    result = cv2.medianBlur(result, 3)
+    return Image.fromarray(result)
+
+
+def preprocess_page_bgr(
+    image_bgr: np.ndarray,
+    source_dpi: int = 200,
+    target_dpi: int = 200,
+) -> np.ndarray:
+    rotated = safe_rotate_image(image_bgr)
+    rgb = cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB)
+    img = Image.fromarray(rgb)
+    img = preprocessing_stage_4_1(img)
+    img = preprocessing_stage_4_2(img)
+    img = preprocessing_stage_4_3(img)
+    img = preprocessing_stage_5_2_binarization(img)
+    img = convert_dpi(img, from_dpi=source_dpi, to_dpi=target_dpi)
+    return np.array(img.convert("L"))
+
+
+def clean_page_bgr_exact(
+    img_bgr: np.ndarray,
+    source_dpi: int = 200,
+    target_dpi: int = 200,
+) -> np.ndarray:
+    return preprocess_page_bgr(img_bgr, source_dpi=source_dpi, target_dpi=target_dpi)
