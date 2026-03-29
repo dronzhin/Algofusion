@@ -25,7 +25,10 @@ class CleanerModule(BaseModule):
 
     def __init__(self, module_config: Optional[Dict[str, Any]] = None):
         super().__init__(module_config)
-        self.default_config = {"dpi": config.default_dpi}
+        self.default_config = {
+            "dpi": config.default_dpi,
+            "output_dpi": config.output_dpi,
+        }
         self.config = {**self.default_config, **(module_config or {})}
 
     def process(self, job: FileJob) -> bool:
@@ -55,6 +58,7 @@ class CleanerModule(BaseModule):
                     "outputs": [str(path) for path in outputs],
                     "count": len(outputs),
                     "dpi": self.config["dpi"],
+                    "output_dpi": self.config["output_dpi"],
                 }
             )
             job.add_to_history("cleaner_process", self.name, True, duration=duration)
@@ -82,7 +86,7 @@ class CleanerModule(BaseModule):
             cleaned = clean_page_bgr_exact(
                 bgr,
                 source_dpi=int(self.config["dpi"]),
-                target_dpi=int(self.config["dpi"]),
+                target_dpi=int(self.config["output_dpi"]),
             )
             output_path = output_dir / f"{input_path.stem}_p{idx:02d}_clean.png"
             cv2.imwrite(str(output_path), cleaned)
@@ -97,7 +101,7 @@ class CleanerModule(BaseModule):
         cleaned = clean_page_bgr_exact(
             img,
             source_dpi=source_dpi,
-            target_dpi=int(self.config["dpi"]),
+            target_dpi=int(self.config["output_dpi"]),
         )
         cv2.imwrite(str(output_path), cleaned)
         return output_path
