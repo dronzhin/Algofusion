@@ -8,6 +8,7 @@ import time
 import shutil
 import uuid
 import os
+import json
 from pathlib import Path
 from typing import Set, Optional
 from datetime import datetime, timezone  # РІвЂ С’ FIX: Р вЂќР С•Р В±Р В°Р Р†Р С‘Р В»Р С‘ timezone
@@ -44,6 +45,10 @@ class FileMonitor:
         self.redis = get_redis_client()
 
         self._file_cache: dict[str, tuple[float, float, int]] = {}
+        self.state_dir = self.shared_path / ".monitor_state"
+        self.state_file = self.state_dir / "processed_files.json"
+        self.processed_index: dict[str, dict[str, object]] = {}
+        self._load_persistent_state()
 
         logger.info(
             f"FileMonitor Р С‘Р Р…Р С‘РЎвЂ Р С‘Р В°Р В»Р С‘Р В·Р С‘РЎР‚Р С•Р Р†Р В°Р Р…: "
@@ -51,6 +56,67 @@ class FileMonitor:
             f"shared={self.shared_path}, "
             f"interval={self.check_interval}s"
         )
+
+    def _load_persistent_state(self) -> None:
+        try:
+            safe_mkdir(self.state_dir, mode=0o755)
+            if self.state_file.exists():
+                data = json.loads(self.state_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self.processed_index = data
+            logger.info("Loaded %s persisted monitor fingerprints", len(self.processed_index))
+        except Exception as e:
+            logger.warning(f"Failed to load monitor state: {e}")
+            self.processed_index = {}
+
+    def _save_persistent_state(self) -> None:
+        safe_mkdir(self.state_dir, mode=0o755)
+        temp_path = self.state_file.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(self.processed_index, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(self.state_file)
+
+    def _build_persistent_fingerprint(self, file_path: Path, file_stat: os.stat_result) -> str:
+        try:
+            source = str(file_path.resolve())
+        except Exception:
+            source = str(file_path)
+        return f"{source}|{int(file_stat.st_size)}|{int(file_stat.st_mtime_ns)}"
+
+    def _remember_processed_file(
+            self,
+            file_path: Path,
+            file_stat: os.stat_result,
+            file_id: str,
+            storage_dir: str
+    ) -> None:
+        fingerprint = self._build_persistent_fingerprint(file_path, file_stat)
+        self.processed_index[fingerprint] = {
+            "file_id": file_id,
+            "storage_dir": storage_dir,
+            "filename": file_path.name,
+            "size": int(file_stat.st_size),
+            "mtime_ns": int(file_stat.st_mtime_ns),
+        }
+        if len(self.processed_index) > 5000:
+            self.processed_index = dict(list(self.processed_index.items())[-5000:])
+        self._save_persistent_state()
+
+    def _find_existing_import(self, file_path: Path, file_stat: os.stat_result) -> Optional[str]:
+        for original_path in self.shared_path.glob(f"*/original/{file_path.name}"):
+            try:
+                original_stat = original_path.stat()
+            except FileNotFoundError:
+                continue
+
+            if (
+                    int(original_stat.st_size) == int(file_stat.st_size)
+                    and int(original_stat.st_mtime_ns) == int(file_stat.st_mtime_ns)
+            ):
+                return original_path.parent.parent.name
+        return None
 
     def start(self):
         """Р вЂ”Р В°Р С—РЎС“РЎРѓР С” РЎвЂ Р С‘Р С”Р В»Р В° Р СР С•Р Р…Р С‘РЎвЂљР С•РЎР‚Р С‘Р Р…Р С–Р В°."""
@@ -179,6 +245,20 @@ class FileMonitor:
 
                 file_stat = item.stat()
                 cache_key = f"{item.name}:{file_stat.st_mtime}:{file_stat.st_size}"
+                persistent_key = self._build_persistent_fingerprint(item, file_stat)
+
+                if persistent_key in self.processed_index:
+                    storage_dir = self.processed_index[persistent_key].get("storage_dir", "unknown")
+                    logger.info(f"Skipping already imported file: {item.name} -> {storage_dir}")
+                    self.processed_files.add(cache_key)
+                    continue
+
+                existing_storage = self._find_existing_import(item, file_stat)
+                if existing_storage:
+                    logger.info(f"Skipping file already present in shared storage: {item.name} -> {existing_storage}")
+                    self.processed_files.add(cache_key)
+                    self._remember_processed_file(item, file_stat, file_id="existing", storage_dir=existing_storage)
+                    continue
 
                 if cache_key not in self.processed_files:
                     logger.info(f"Р С›Р В±Р Р…Р В°РЎР‚РЎС“Р В¶Р ВµР Р… Р Р…Р С•Р Р†РЎвЂ№Р в„– РЎвЂћР В°Р в„–Р В»: {item.name} ({file_stat.st_size} Р В±Р В°Р в„–РЎвЂљ)")
@@ -224,6 +304,7 @@ class FileMonitor:
                 return False
 
             shutil.copy2(file_path, dest_path)
+            source_stat = file_path.stat()
 
             # РІвЂ С’ FIX: Р Р‡Р Р†Р Р…Р С• РЎС“РЎРѓРЎвЂљР В°Р Р…Р В°Р Р†Р В»Р С‘Р Р†Р В°Р ВµР С Р С—РЎР‚Р В°Р Р†Р В° Р Р…Р В° РЎРѓР С”Р С•Р С—Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р Р…РЎвЂ№Р в„– РЎвЂћР В°Р в„–Р В»
             try:
@@ -268,6 +349,7 @@ class FileMonitor:
             })
 
             logger.info(f"Р В¤Р В°Р в„–Р В» {file_id} Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р… Р Р† Р С•РЎвЂЎР ВµРЎР‚Р ВµР Т‘РЎРЉ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р С‘")
+            self._remember_processed_file(file_path, source_stat, file_id=file_id, storage_dir=storage_dir)
             return True
 
         except PermissionError as e:
