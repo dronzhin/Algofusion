@@ -156,7 +156,18 @@ def rotate_image_by_angle(image: np.ndarray, angle: float) -> np.ndarray:
     h, w = image.shape[:2]
     center = (w // 2, h // 2)
     matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-    return cv2.warpAffine(image, matrix, (w, h))
+    if image.ndim == 2:
+        border_value: int | tuple[int, int, int] = 255
+    else:
+        border_value = (255, 255, 255)
+    return cv2.warpAffine(
+        image,
+        matrix,
+        (w, h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=border_value,
+    )
 
 
 def rotate_image_notebook_style(image_bgr: np.ndarray) -> np.ndarray:
