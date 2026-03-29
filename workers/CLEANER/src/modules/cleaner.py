@@ -59,6 +59,7 @@ class CleanerModule(BaseModule):
                     "count": len(outputs),
                     "dpi": self.config["dpi"],
                     "output_dpi": self.config["output_dpi"],
+                    "a4_canvas_enabled": config.a4_canvas_enabled,
                 }
             )
             job.add_to_history("cleaner_process", self.name, True, duration=duration)
@@ -85,7 +86,6 @@ class CleanerModule(BaseModule):
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
             cleaned = clean_page_bgr_exact(
                 bgr,
-                source_dpi=int(self.config["dpi"]),
                 target_dpi=int(self.config["output_dpi"]),
             )
             output_path = output_dir / f"{input_path.stem}_p{idx:02d}_clean.png"
@@ -97,38 +97,40 @@ class CleanerModule(BaseModule):
         img = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Cannot read image: {input_path}")
-        source_dpi = _read_image_dpi(input_path, fallback_dpi=int(self.config["dpi"]))
         cleaned = clean_page_bgr_exact(
             img,
-            source_dpi=source_dpi,
             target_dpi=int(self.config["output_dpi"]),
         )
         cv2.imwrite(str(output_path), cleaned)
         return output_path
 
 
-def convert_dpi(input_img: Image.Image, from_dpi: int = 600, to_dpi: int = 200) -> Image.Image:
-    if from_dpi <= 0 or to_dpi <= 0 or from_dpi == to_dpi:
+def fit_to_a4_canvas(input_img: Image.Image, target_dpi: int = 600) -> Image.Image:
+    if target_dpi <= 0:
         return input_img
-    scale = to_dpi / from_dpi
-    new_width = max(1, int(round(input_img.width * scale)))
-    new_height = max(1, int(round(input_img.height * scale)))
-    return input_img.resize((new_width, new_height), resample=Image.LANCZOS)
 
+    portrait_size = (
+        max(1, int(round(8.27 * target_dpi))),
+        max(1, int(round(11.69 * target_dpi))),
+    )
+    landscape_size = (portrait_size[1], portrait_size[0])
+    target_size = portrait_size if input_img.height >= input_img.width else landscape_size
 
-def _read_image_dpi(input_path: Path, fallback_dpi: int) -> int:
-    try:
-        with Image.open(input_path) as img:
-            dpi = img.info.get("dpi")
-            if isinstance(dpi, tuple) and dpi:
-                value = int(round(float(dpi[0])))
-                if value > 0:
-                    return value
-            if isinstance(dpi, (int, float)) and dpi > 0:
-                return int(round(float(dpi)))
-    except Exception:
-        pass
-    return fallback_dpi
+    scale = min(target_size[0] / input_img.width, target_size[1] / input_img.height)
+    new_size = (
+        max(1, int(round(input_img.width * scale))),
+        max(1, int(round(input_img.height * scale))),
+    )
+
+    resized = input_img.resize(new_size, resample=Image.LANCZOS)
+    fill = 255 if resized.mode == "L" else (255, 255, 255)
+    canvas = Image.new(resized.mode, target_size, color=fill)
+    offset = (
+        (target_size[0] - new_size[0]) // 2,
+        (target_size[1] - new_size[1]) // 2,
+    )
+    canvas.paste(resized, offset)
+    return canvas
 
 
 def detect_skew_angle_by_hough_lines(
@@ -279,8 +281,7 @@ def preprocessing_stage_5_2_binarization(input_img: Image.Image) -> Image.Image:
 
 def preprocess_page_bgr(
     image_bgr: np.ndarray,
-    source_dpi: int = 200,
-    target_dpi: int = 200,
+    target_dpi: int = 600,
 ) -> np.ndarray:
     rotated = safe_rotate_image(image_bgr)
     rgb = cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB)
@@ -289,13 +290,13 @@ def preprocess_page_bgr(
     img = preprocessing_stage_4_2(img)
     img = preprocessing_stage_4_3(img)
     img = preprocessing_stage_5_2_binarization(img)
-    img = convert_dpi(img, from_dpi=source_dpi, to_dpi=target_dpi)
+    if config.a4_canvas_enabled:
+        img = fit_to_a4_canvas(img, target_dpi=target_dpi)
     return np.array(img.convert("L"))
 
 
 def clean_page_bgr_exact(
     img_bgr: np.ndarray,
-    source_dpi: int = 200,
-    target_dpi: int = 200,
+    target_dpi: int = 600,
 ) -> np.ndarray:
-    return preprocess_page_bgr(img_bgr, source_dpi=source_dpi, target_dpi=target_dpi)
+    return preprocess_page_bgr(img_bgr, target_dpi=target_dpi)

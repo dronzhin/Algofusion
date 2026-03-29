@@ -82,7 +82,8 @@ services:
         - NEXT_QUEUE=files:layout
         - SHARED_FILES_DIR=/shared/files
         - CLEANER_DPI=600
-        - CLEANER_OUTPUT_DPI=200
+        - CLEANER_OUTPUT_DPI=600
+        - CLEANER_A4_CANVAS_ENABLED=true
         - CLEANER_ROTATE_MIN_ABS_ANGLE=0.1
         - CLEANER_ROTATE_MAX_ABS_ANGLE=20.0
         - CLEANER_HOUGH_CANNY1=50
