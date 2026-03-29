@@ -1,442 +1,437 @@
-"""Document detail page."""
+"""
+РЎС‚СЂР°РЅРёС†Р° РґРµС‚Р°Р»РµР№ С„Р°Р№Р»Р°.
+РСЃРїРѕР»СЊР·СѓРµС‚ С†РµРЅС‚СЂР°Р»РёР·РѕРІР°РЅРЅС‹Рµ СѓС‚РёР»РёС‚С‹ РёР· ui/utils/* РґР»СЏ СѓСЃС‚СЂР°РЅРµРЅРёСЏ РґСѓР±Р»РёСЂРѕРІР°РЅРёСЏ.
+"""
 
-from __future__ import annotations
-
-import copy
-import json
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+# ============================================================================
+# РРњРџРћР РўР«
+# ============================================================================
 
 import streamlit as st
+import json  # в†ђ Р”РћР‘РђР’Р›Р•РќРћ: С‚СЂРµР±СѓРµС‚СЃСЏ РґР»СЏ json.dumps
+from typing import Dict, Any, Optional
+from datetime import datetime, timezone  # в†ђ Р”РћР‘РђР’Р›Р•РќРћ: С‚СЂРµР±СѓРµС‚СЃСЏ РґР»СЏ datetime.now(timezone.utc)
 
 from shared.utils.logger import setup_logger
-from ui.utils.constants import MODULE_LABELS, MODULES_ORDER
+from shared.models.file import FileJob, FileStatus, ExportStatus
+from ui.utils.constants import MODULES_ORDER, FILE_STATUS_CONFIG, EXPORT_STATUS_CONFIG, UI_CONFIG
 from ui.utils.formatters import (
     format_datetime_full,
     format_file_size_human,
-    render_status_badge_safe,
+    render_status_badge,
+    render_export_status_badge,
+    calculate_module_progress,
+)
+from ui.utils.components import (
+    error_handler,
+    render_section_header,
+    render_action_button,
+    render_empty_state,
+)
+from ui.utils.redis_helpers import (
+    safe_get_all_files,
+    safe_update_file_status,
+    push_job_to_queue,
+    safe_get_file_status,
 )
 
 logger = setup_logger("ui.pages.file_detail_page")
 
-FIELD_LABELS = {
-    "document_type": "Тип документа",
-    "document_series": "Серия",
-    "document_number": "Номер документа",
-    "date": "Дата",
-    "document_date": "Дата документа",
-    "invoice_number": "Номер счета",
-    "invoice_date": "Дата счета",
-    "payment_deadline": "Срок оплаты",
-    "payment_order_number": "Номер платежного поручения",
-    "payment_order_type": "Тип платежного поручения",
-    "basis": "Основание",
-    "note": "Примечание",
-    "name": "Наименование",
-    "address": "Адрес",
-    "tax_id": "УНП / ИНН",
-    "quantity_total": "Итого количество",
-    "cost_total": "Сумма без НДС",
-    "vat_total": "Сумма НДС",
-    "cost_with_vat_total": "Сумма с НДС",
-    "vat_total_words": "НДС прописью",
-    "cost_with_vat_total_words": "Сумма прописью",
-    "urgent": "Срочный платеж",
-    "non_urgent": "Несрочный платеж",
-}
 
+# ============================================================================
+# РћРЎРќРћР’РќРђРЇ Р¤РЈРќРљР¦РРЇ
+# ============================================================================
 
 def render_file_detail_page(session_state) -> None:
-    file_index = session_state.editing_file_index
-    redis_client = session_state.redis_client
+    """
+    Р РµРЅРґРµСЂРёС‚ СЃС‚СЂР°РЅРёС†Сѓ РґРµС‚Р°Р»РµР№ С„Р°Р№Р»Р°.
 
-    if file_index is None or not redis_client:
-        st.error("Документ не выбран.")
+    Args:
+        session_state: Р­РєР·РµРјРїР»СЏСЂ SessionState РґР»СЏ РЅР°РІРёРіР°С†РёРё Рё РґР°РЅРЅС‹С…
+    """
+    with error_handler("file_detail_page", "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РґРµС‚Р°Р»РµР№ С„Р°Р№Р»Р°"):
+        file_index = session_state.editing_file_index
+        redis_client = session_state.redis_client
+        file_service = session_state.file_service
+
+        # Р’Р°Р»РёРґР°С†РёСЏ РІС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…
+        if file_index is None or not redis_client:
+            st.error("вќЊ Р¤Р°Р№Р» РЅРµ РІС‹Р±СЂР°РЅ")
+            _render_back_button(session_state)
+            return
+
+        files = safe_get_all_files(redis_client)
+        if file_index is None or file_index >= len(files):
+            st.error("вќЊ Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ")
+            _render_back_button(session_state)
+            return
+
+        file_data = files[file_index]
+        file_id = file_data.get("file_id")
+
+        logger.info(f"Р РµРЅРґРµСЂРёРЅРі РґРµС‚Р°Р»РµР№ С„Р°Р№Р»Р°: {file_id}")
+
+        # Р—Р°РіРѕР»РѕРІРѕРє Рё РЅР°РІРёРіР°С†РёСЏ
+        st.title("рџ“‹ Р”РµС‚Р°Р»Рё С„Р°Р№Р»Р°")
         _render_back_button(session_state)
-        return
+        st.divider()
 
-    files = redis_client.get_all_files()
-    if file_index >= len(files):
-        st.error("Документ не найден.")
-        _render_back_button(session_state)
-        return
+        # РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ (3 РєРѕР»РѕРЅРєРё)
+        col1, col2, col3 = st.columns(3)
 
-    file_data = files[file_index]
-    base_path = _resolve_base_path(session_state, file_data)
-    payload, payload_path = _load_primary_payload(base_path)
-    payload_kind, editable_payload, wrap_keys = _unwrap_payload(payload)
-    scalar_fields = _collect_scalar_fields(editable_payload)
-    items = _extract_items(editable_payload)
-    preview_path = _find_preview_image(base_path)
+        with col1:
+            _render_file_info_col(file_data)
 
-    _render_back_button(session_state)
-    _render_document_header(file_data, payload_kind)
-    _render_pipeline_progress(file_data)
+        with col2:
+            _render_status_col(file_data)  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data
 
-    tabs = st.tabs(["Обзор", "Поля", "Товары", "Файлы", "Raw JSON", "История"])
+        with col3:
+            _render_export_col(file_data)  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data
 
-    with tabs[0]:
-        _render_overview_tab(file_data, editable_payload, preview_path, payload_kind)
-    with tabs[1]:
-        _render_fields_tab(file_data, payload, editable_payload, wrap_keys, scalar_fields, payload_path)
-    with tabs[2]:
-        _render_items_tab(payload, editable_payload, wrap_keys, items, payload_path)
-    with tabs[3]:
-        _render_files_tab(file_data, base_path, payload_path)
-    with tabs[4]:
-        if payload is not None:
-            st.json(payload)
-        else:
-            st.info("Итоговый JSON пока не найден.")
-    with tabs[5]:
-        _render_history_tab(file_data)
+        st.divider()
 
+        # РџСЂРѕРіСЂРµСЃСЃ РїРѕ РјРѕРґСѓР»СЏРј
+        render_section_header("рџ“€ РџСЂРѕРіСЂРµСЃСЃ РѕР±СЂР°Р±РѕС‚РєРё")
+        _render_module_progress(file_data)
+
+        st.divider()
+
+        # РСЃС‚РѕСЂРёСЏ РѕР±СЂР°Р±РѕС‚РєРё
+        render_section_header("рџ“њ РСЃС‚РѕСЂРёСЏ РѕР±СЂР°Р±РѕС‚РєРё")
+        _render_history(file_data)
+
+        st.divider()
+
+        # Р¤Р°Р№Р»С‹ РІ СЃС‚СЂСѓРєС‚СѓСЂРµ
+        render_section_header("рџ“‚ Р¤Р°Р№Р»С‹ РІ СЃС‚СЂСѓРєС‚СѓСЂРµ")
+        _render_file_structure(file_id, file_service)
+
+        st.divider()
+
+        # Р”РµР№СЃС‚РІРёСЏ
+        render_section_header("вљЎ Р”РµР№СЃС‚РІРёСЏ")
+        _render_actions(file_id, file_data, redis_client)
+
+
+# ============================================================================
+# Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР
+# ============================================================================
 
 def _render_back_button(session_state) -> None:
-    if st.button("Назад к документам"):
+    """РљРЅРѕРїРєР° РІРѕР·РІСЂР°С‚Р° Рє СЂРµРµСЃС‚СЂСѓ."""
+    if st.button("в†ђ Р’РµСЂРЅСѓС‚СЊСЃСЏ Рє СЂРµРµСЃС‚СЂСѓ", key="back_to_list"):
         session_state.current_page = "main"
         session_state.editing_file_index = None
         st.rerun()
 
 
-def _render_document_header(file_data: Dict[str, Any], payload_kind: str) -> None:
-    title = file_data.get("original_filename", "Документ")
-    left, right = st.columns([3, 1.2], gap="large")
-    with left:
-        st.markdown(f"## {title}")
-        st.caption(payload_kind)
-    with right:
-        render_status_badge_safe(file_data.get("status", "uploaded"), st)
+def _render_file_info_col(file_data: Dict[str, Any]) -> None:
+    """Р РµРЅРґРµСЂРёС‚ РєРѕР»РѕРЅРєСѓ СЃ РѕСЃРЅРѕРІРЅРѕР№ РёРЅС„РѕСЂРјР°С†РёРµР№ Рѕ С„Р°Р№Р»Рµ."""
+    st.markdown("### рџ“Ѓ РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ")
+    st.markdown(f"**ID:** `{file_data.get('file_id', 'unknown')}`")
+    st.markdown(f"**РРјСЏ:** {file_data.get('original_filename', 'Unknown')}")
+    st.markdown(f"**РўРёРї:** `{file_data.get('file_type', 'unknown')}`")
+    st.markdown(f"**Р Р°Р·РјРµСЂ:** {format_file_size_human(file_data.get('file_size', 0))}")
 
-    meta_cols = st.columns(4, gap="small")
-    meta_cols[0].metric("Файл", title)
-    meta_cols[1].metric("Размер", format_file_size_human(file_data.get("file_size", 0)))
-    meta_cols[2].metric("Создан", format_datetime_full(file_data.get("created_at")))
-    meta_cols[3].metric("Обновлен", format_datetime_full(file_data.get("updated_at")))
+    # Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РјРµС‚Р°РґР°РЅРЅС‹Рµ РµСЃР»Рё РµСЃС‚СЊ
+    metadata = file_data.get('metadata', {})
+    if metadata:
+        with st.expander("рџ“¦ РњРµС‚Р°РґР°РЅРЅС‹Рµ", expanded=False):
+            for key, value in metadata.items():
+                st.markdown(f"**{key}:** {value}")
 
 
-def _render_pipeline_progress(file_data: Dict[str, Any]) -> None:
+def _render_status_col(file_data: Dict[str, Any]) -> None:  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data: Dict
+    """Р РµРЅРґРµСЂРёС‚ РєРѕР»РѕРЅРєСѓ СЃРѕ СЃС‚Р°С‚СѓСЃРѕРј РѕР±СЂР°Р±РѕС‚РєРё."""
+    st.markdown("### рџ“Љ РЎС‚Р°С‚СѓСЃ РѕР±СЂР°Р±РѕС‚РєРё")
+
+    status = file_data.get("status", "unknown")
+    # в†ђ FIX: unsafe_allow_html=True РґР»СЏ СЂРµРЅРґРµСЂРёРЅРіР° С†РІРµС‚РЅС‹С… Р±РµР№РґР¶РµР№
+    st.markdown(f"**РЎС‚Р°С‚СѓСЃ:** {render_status_badge(status)}", unsafe_allow_html=True)
+
+    current_module = file_data.get("current_module")
+    module_display = f"`{current_module}`" if current_module else "вЂ”"
+    st.markdown(f"**РњРѕРґСѓР»СЊ:** {module_display}")
+
+    st.markdown(f"**РЎРѕР·РґР°РЅ:** {format_datetime_full(file_data.get('created_at'))}")
+    st.markdown(f"**РћР±РЅРѕРІР»С‘РЅ:** {format_datetime_full(file_data.get('updated_at'))}")
+
+    retry_count = file_data.get("retry_count", 0)
+    max_retries = file_data.get("max_retries", 3)
+    if retry_count > 0:
+        st.caption(f"рџ”„ РџРѕРїС‹С‚РєРё: {retry_count}/{max_retries}")
+
+
+def _render_export_col(file_data: Dict[str, Any]) -> None:  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data: Dict
+    """Р РµРЅРґРµСЂРёС‚ РєРѕР»РѕРЅРєСѓ СЃРѕ СЃС‚Р°С‚СѓСЃРѕРј СЌРєСЃРїРѕСЂС‚Р° РІ 1РЎ."""
+    st.markdown("### рџ“¤ Р­РєСЃРїРѕСЂС‚ РІ 1РЎ")
+
+    export_status = file_data.get("export_status", "pending")
+    # в†ђ FIX: unsafe_allow_html=True
+    st.markdown(f"**РЎС‚Р°С‚СѓСЃ:** {render_export_status_badge(export_status)}", unsafe_allow_html=True)
+
+    st.markdown(f"**РџРѕРїС‹С‚РѕРє:** {file_data.get('export_attempts', 0)}")
+
+    export_error = file_data.get("export_error")
+    if export_error:
+        st.error(f"вќЊ {export_error}")
+
+    exported_at = file_data.get("exported_at")
+    if exported_at:
+        st.caption(f"вњ… Р­РєСЃРїРѕСЂС‚РёСЂРѕРІР°РЅ: {format_datetime_full(exported_at)}")
+
+    doc_id = file_data.get("document_1c_id")
+    if doc_id:
+        st.caption(f"рџ†” Р”РѕРєСѓРјРµРЅС‚ 1РЎ: `{doc_id}`")
+
+
+def _render_module_progress(file_data: Dict[str, Any]) -> None:
+    """
+    Р РµРЅРґРµСЂРёС‚ РїСЂРѕРіСЂРµСЃСЃ РїРѕ РјРѕРґСѓР»СЏРј РѕР±СЂР°Р±РѕС‚РєРё.
+    РСЃРїРѕР»СЊР·СѓРµС‚ РѕР±С‰СѓСЋ С„СѓРЅРєС†РёСЋ calculate_module_progress РёР· utils.
+    """
     completed = set(file_data.get("completed_modules", []))
     current = file_data.get("current_module")
 
-    st.markdown("### Этапы обработки")
-    cols = st.columns(len(MODULES_ORDER), gap="small")
-    for col, module in zip(cols, MODULES_ORDER):
-        if module in completed:
-            state = "Готово"
-            color = "#2F6B55"
-        elif current == module:
-            state = "Сейчас"
-            color = "#C46A3A"
-        else:
-            state = "Ожидает"
-            color = "#7C766D"
-        with col:
-            st.markdown(
-                f"""
-                <div style="border:1px solid #D9D2C3;border-radius:14px;padding:10px 12px;background:#FFFDF8;">
-                    <div style="font-size:12px;color:#6E675E;">{MODULE_LABELS.get(module, module)}</div>
-                    <div style="font-size:14px;font-weight:600;color:{color};margin-top:4px;">{state}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    progress, status_texts = calculate_module_progress(completed, current)
+
+    st.progress(progress / 100)
+    st.caption(" | ".join(status_texts))
+
+    # Р”РµС‚Р°Р»Рё РїРѕ РєР°Р¶РґРѕРјСѓ РјРѕРґСѓР»СЋ
+    with st.expander("рџ”Ќ Р”РµС‚Р°Р»Рё РїРѕ РјРѕРґСѓР»СЏРј", expanded=False):
+        for module in MODULES_ORDER:
+            if module in completed:
+                st.markdown(f"вњ… **{module}** вЂ” Р·Р°РІРµСЂС€С‘РЅ")
+            elif current == module:
+                st.markdown(f"рџ”„ **{module}** вЂ” РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ")
+            else:
+                st.markdown(f"вЏі **{module}** вЂ” РѕР¶РёРґР°РµС‚")
 
 
-def _render_overview_tab(
-    file_data: Dict[str, Any],
-    payload: Dict[str, Any],
-    preview_path: Path | None,
-    payload_kind: str,
-) -> None:
-    left, right = st.columns([1.4, 1.8], gap="large")
-    with left:
-        st.markdown("#### Карточка документа")
-        for label, value in _overview_pairs(payload, payload_kind):
-            st.markdown(f"**{label}:** {value}")
-    with right:
-        st.markdown("#### Превью")
-        if preview_path and preview_path.exists():
-            st.image(str(preview_path), use_container_width=True)
-        else:
-            st.info("Превью пока недоступно.")
+def _render_history(file_data: Dict[str, Any]) -> None:
+    """Р РµРЅРґРµСЂРёС‚ РёСЃС‚РѕСЂРёСЋ РѕР±СЂР°Р±РѕС‚РєРё С„Р°Р№Р»Р°."""
+    history = file_data.get("history", [])
 
-
-def _render_fields_tab(
-    file_data: Dict[str, Any],
-    full_payload: Dict[str, Any] | None,
-    editable_payload: Dict[str, Any],
-    wrap_keys: List[str],
-    scalar_fields: List[Tuple[Tuple[str, ...], Any]],
-    payload_path: Path | None,
-) -> None:
-    if full_payload is None or payload_path is None:
-        st.info("Финальный JSON для редактирования пока не найден.")
-        return
-
-    st.markdown("#### Поля документа")
-    if not scalar_fields:
-        st.caption("Простые поля для редактирования не найдены.")
-        return
-
-    values: Dict[Tuple[str, ...], Any] = {}
-    with st.form(f"fields_form_{file_data.get('file_id')}"):
-        current_group = None
-        for path, value in scalar_fields:
-            group = path[0] if len(path) > 1 else "common"
-            if group != current_group:
-                current_group = group
-                title = _group_label(group)
-                st.markdown(f"##### {title}")
-
-            label = _field_label(path)
-            widget_key = "field_" + "__".join(path)
-            values[path] = _render_field_widget(widget_key, label, value)
-
-        submitted = st.form_submit_button("Сохранить поля", use_container_width=True, type="primary")
-
-    if submitted:
-        updated_full_payload = copy.deepcopy(full_payload)
-        target = _get_wrapped_target(updated_full_payload, wrap_keys)
-        for path, new_value in values.items():
-            _set_nested_value(target, path, new_value)
-        payload_path.write_text(json.dumps(updated_full_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        st.success("Изменения сохранены в итоговый JSON.")
-
-
-def _render_items_tab(
-    full_payload: Dict[str, Any] | None,
-    editable_payload: Dict[str, Any],
-    wrap_keys: List[str],
-    items: Tuple[str | None, List[Dict[str, Any]]],
-    payload_path: Path | None,
-) -> None:
-    items_key, rows = items
-    if full_payload is None or payload_path is None or not rows or not items_key:
-        st.info("Табличная часть не найдена.")
-        return
-
-    st.markdown("#### Табличная часть")
-    edited_rows = st.data_editor(rows, use_container_width=True, num_rows="dynamic")
-    if st.button("Сохранить табличную часть", type="primary", key="save_items"):
-        updated_full_payload = copy.deepcopy(full_payload)
-        target = _get_wrapped_target(updated_full_payload, wrap_keys)
-        if hasattr(edited_rows, "to_dict"):
-            target[items_key] = edited_rows.to_dict("records")
-        else:
-            target[items_key] = list(edited_rows)
-        payload_path.write_text(json.dumps(updated_full_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        st.success("Табличная часть сохранена.")
-
-
-def _render_files_tab(file_data: Dict[str, Any], base_path: Path, payload_path: Path | None) -> None:
-    st.markdown("#### Связанные файлы")
-    files_to_show = []
-    original_path = base_path / "original" / file_data.get("original_filename", "")
-    if original_path.exists():
-        files_to_show.append(("Исходный файл", original_path))
-    if payload_path and payload_path.exists():
-        files_to_show.append(("Финальный JSON", payload_path))
-
-    cleaner_files = sorted((base_path / "cleaner").glob("*")) if (base_path / "cleaner").exists() else []
-    if cleaner_files:
-        files_to_show.append(("Очищенная страница", cleaner_files[0]))
-
-    for label, path in files_to_show:
-        with st.container(border=True):
-            st.markdown(f"**{label}**")
-            st.code(str(path))
-            if path.is_file():
-                mime = "application/json" if path.suffix.lower() == ".json" else None
-                st.download_button(
-                    f"Скачать: {label}",
-                    data=path.read_bytes(),
-                    file_name=path.name,
-                    mime=mime,
-                    key=f"download_{label}_{path.name}",
-                )
-
-    with st.expander("Технические папки", expanded=False):
-        for child in sorted(base_path.iterdir()):
-            st.markdown(f"- `{child.name}`")
-
-
-def _render_history_tab(file_data: Dict[str, Any]) -> None:
-    st.markdown("#### История обработки")
-    history = list(reversed(file_data.get("history", [])))
     if not history:
-        st.caption("История пока пуста.")
-    for record in history:
-        ok = "OK" if record.get("success") else "ERR"
-        action = record.get("action", "-")
-        module = record.get("module", "-")
-        timestamp = format_datetime_full(record.get("timestamp"))
-        st.markdown(f"**{timestamp}** | `{module}` | {ok} | {action}")
-        if record.get("error"):
-            st.caption(record["error"])
+        render_empty_state("РСЃС‚РѕСЂРёСЏ РїСѓСЃС‚Р° вЂ” РѕР±СЂР°Р±РѕС‚РєР° РµС‰С‘ РЅРµ РЅР°С‡РёРЅР°Р»Р°СЃСЊ")
+        return
 
-    if file_data.get("errors"):
-        st.markdown("#### Ошибки")
-        for error in file_data["errors"]:
-            st.error(error)
+    # РџРѕРєР°Р·С‹РІР°РµРј РїРѕСЃР»РµРґРЅРёРµ Р·Р°РїРёСЃРё СЃ СѓС‡С‘С‚РѕРј Р»РёРјРёС‚Р°
+    display_limit = UI_CONFIG["max_logs_display"]
+    for record in reversed(history[-display_limit:]):
+        _render_history_record(record)
 
 
-def _resolve_base_path(session_state, file_data: Dict[str, Any]) -> Path:
-    base = Path(session_state.settings.shared_files_path)
-    storage_dir = file_data.get("storage_dir")
-    if storage_dir:
-        preferred = base / storage_dir
-        if preferred.exists():
-            return preferred
-    by_name = base / Path(file_data.get("original_filename", "document")).stem
-    if by_name.exists():
-        return by_name
-    return base / file_data.get("file_id", "")
+def _render_history_record(record: Dict[str, Any]) -> None:
+    """Р РµРЅРґРµСЂРёС‚ РѕРґРЅСѓ Р·Р°РїРёСЃСЊ РёСЃС‚РѕСЂРёРё."""
+    timestamp = format_datetime_full(record.get("timestamp"))
+    module = record.get("module", "unknown")
+    action = record.get("action", "unknown")
+    success = record.get("success", False)
+    error = record.get("error")
+    duration = record.get("duration_seconds")
+
+    emoji = "вњ…" if success else "вќЊ"
+    duration_str = f" ({duration:.2f}СЃ)" if duration else ""
+
+    st.markdown(f"{emoji} **{timestamp}** вЂ” `{module}`: {action}{duration_str}")
+
+    if error:
+        st.caption(f"рџ”ґ РћС€РёР±РєР°: {error}")
 
 
-def _load_primary_payload(base_path: Path) -> Tuple[Dict[str, Any] | None, Path | None]:
-    final_dir = base_path / "data" / "final_json"
-    if final_dir.exists():
-        candidates = sorted(final_dir.glob("*.json"))
-        if candidates:
-            path = candidates[0]
-            try:
-                return json.loads(path.read_text(encoding="utf-8")), path
-            except Exception as exc:
-                logger.warning("Failed to read final json %s: %s", path, exc)
-    return None, None
+def _render_file_structure(file_id: str, file_service) -> None:
+    """Р РµРЅРґРµСЂРёС‚ СЃС‚СЂСѓРєС‚СѓСЂСѓ С„Р°Р№Р»РѕРІ РЅР° РґРёСЃРєРµ."""
+    if not file_service:
+        render_empty_state("вљ пёЏ FileService РЅРµ РґРѕСЃС‚СѓРїРµРЅ")
+        return
+
+    with error_handler("file_structure", "РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ СЃС‚СЂСѓРєС‚СѓСЂС‹ С„Р°Р№Р»РѕРІ"):
+        file_info = file_service.get_file_info(file_id, file_data.get("original_filename"), file_data.get("storage_dir"))
+
+        if not file_info:
+            render_empty_state("вљ пёЏ РРЅС„РѕСЂРјР°С†РёСЏ Рѕ С„Р°Р№Р»Рµ РЅРµ РЅР°Р№РґРµРЅР° РЅР° РґРёСЃРєРµ")
+            return
+
+        directories = file_info.get("directories", {})
+        if not directories:
+            render_empty_state("рџ“­ РџР°РїРєРё РїСѓСЃС‚С‹Рµ")
+            return
+
+        for folder, info in directories.items():
+            file_count = info.get("file_count", 0)
+            with st.expander(f"рџ“Ѓ {folder} ({file_count} С„Р°Р№Р»РѕРІ)", expanded=False):
+                st.caption(f"рџ“Ќ `{info.get('path', '')}`")
+
+                files = info.get("files", [])
+                if files:
+                    for filename in files[:20]:  # Р›РёРјРёС‚ РЅР° РѕС‚РѕР±СЂР°Р¶РµРЅРёРµ
+                        st.markdown(f"рџ“„ `{filename}`")
+                    if len(files) > 20:
+                        st.caption(f"... Рё РµС‰С‘ {len(files) - 20} С„Р°Р№Р»РѕРІ")
+                else:
+                    st.caption("рџ“­ РџСѓСЃС‚Рѕ")
 
 
-def _unwrap_payload(payload: Dict[str, Any] | None) -> Tuple[str, Dict[str, Any], List[str]]:
-    if not isinstance(payload, dict):
-        return "Документ", {}, []
+def _render_actions(file_id: str, file_data: Dict[str, Any], redis_client) -> None:
+    """Р РµРЅРґРµСЂРёС‚ РєРЅРѕРїРєРё РґРµР№СЃС‚РІРёР№ СЃ С„Р°Р№Р»РѕРј."""
+    col1, col2, col3 = st.columns(3)
 
-    if "document_type" in payload:
-        return str(payload.get("document_type") or "Документ"), payload, []
+    with col1:
+        _render_retry_button(file_id, file_data, redis_client)
 
-    if len(payload) == 1:
-        root_key, root_value = next(iter(payload.items()))
-        if isinstance(root_value, dict) and len(root_value) == 1:
-            doc_id, inner = next(iter(root_value.items()))
-            if isinstance(inner, dict):
-                return root_key.replace("_", " ").title(), inner, [root_key, doc_id]
-        if isinstance(root_value, dict):
-            return root_key.replace("_", " ").title(), root_value, [root_key]
+    with col2:
+        _render_export_button(file_id, file_data, redis_client)
 
-    return "Документ", payload, []
+    with col3:
+        _render_delete_button(file_id, redis_client)
 
 
-def _collect_scalar_fields(data: Dict[str, Any], prefix: Tuple[str, ...] = ()) -> List[Tuple[Tuple[str, ...], Any]]:
-    fields: List[Tuple[Tuple[str, ...], Any]] = []
-    for key, value in data.items():
-        path = prefix + (key,)
-        if isinstance(value, dict):
-            fields.extend(_collect_scalar_fields(value, path))
-        elif isinstance(value, list):
-            continue
-        else:
-            fields.append((path, value))
-    return fields
+def _render_retry_button(file_id: str, file_data: Dict[str, Any], redis_client) -> None:
+    """РљРЅРѕРїРєР° РїРµСЂРµР·Р°РїСѓСЃРєР° РѕР±СЂР°Р±РѕС‚РєРё."""
+    status = file_data.get("status", "")
+    disabled = status in ["processing", "exporting"]
 
-
-def _extract_items(data: Dict[str, Any]) -> Tuple[str | None, List[Dict[str, Any]]]:
-    for key, value in data.items():
-        if isinstance(value, list) and value and isinstance(value[0], dict):
-            return key, value
-    return None, []
-
-
-def _field_label(path: Tuple[str, ...]) -> str:
-    if len(path) == 1:
-        return FIELD_LABELS.get(path[0], path[0].replace("_", " ").capitalize())
-    return FIELD_LABELS.get(path[-1], path[-1].replace("_", " ").capitalize())
-
-
-def _group_label(group: str) -> str:
-    labels = {
-        "common": "Основные данные",
-        "sender": "Отправитель",
-        "receiver": "Получатель",
-        "payer": "Плательщик",
-        "supplier": "Поставщик",
-        "customer": "Покупатель",
-        "payee": "Получатель платежа",
-        "payment_details": "Детали платежа",
-        "execution_details": "Исполнение",
-        "signatory": "Подписи",
-        "totals": "Итоги",
-        "approvals": "Подтверждение",
-        "footer": "Подвал",
-    }
-    return labels.get(group, group.replace("_", " ").capitalize())
-
-
-def _render_field_widget(widget_key: str, label: str, value: Any) -> Any:
-    if isinstance(value, bool):
-        return st.checkbox(label, value=value, key=widget_key)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return st.number_input(label, value=value, step=1, key=widget_key)
-    if isinstance(value, float):
-        return st.number_input(label, value=float(value), key=widget_key)
-    return st.text_input(label, value="" if value is None else str(value), key=widget_key)
-
-
-def _set_nested_value(target: Dict[str, Any], path: Tuple[str, ...], value: Any) -> None:
-    node = target
-    for part in path[:-1]:
-        node = node.setdefault(part, {})
-    leaf = path[-1]
-    current = node.get(leaf)
-    if current is None:
-        node[leaf] = value
-    elif isinstance(current, bool):
-        node[leaf] = bool(value)
-    elif isinstance(current, int) and not isinstance(current, bool):
-        node[leaf] = int(value)
-    elif isinstance(current, float):
-        node[leaf] = float(value)
-    else:
-        node[leaf] = value
-
-
-def _get_wrapped_target(payload: Dict[str, Any], wrap_keys: Iterable[str]) -> Dict[str, Any]:
-    node = payload
-    for key in wrap_keys:
-        node = node[key]
-    return node
-
-
-def _overview_pairs(payload: Dict[str, Any], payload_kind: str) -> List[Tuple[str, Any]]:
-    pairs: List[Tuple[str, Any]] = [("Тип", payload_kind)]
-    candidates = [
-        ("Номер", payload.get("document_number") or payload.get("invoice_number") or payload.get("payment_order_number")),
-        ("Дата", payload.get("date") or payload.get("invoice_date") or payload.get("document_date")),
-        ("Основание", payload.get("basis")),
-    ]
-    for section in ("sender", "receiver", "supplier", "customer", "payer", "payee"):
-        value = payload.get(section)
-        if isinstance(value, dict):
-            pairs.append((_group_label(section), value.get("name") or "-"))
-    totals = payload.get("totals")
-    if isinstance(totals, dict):
-        candidates.append(("Сумма", totals.get("cost_with_vat_total") or totals.get("cost_total")))
-    for label, value in candidates:
-        if value not in (None, "", []):
-            pairs.append((label, value))
-    return pairs
-
-
-def _find_preview_image(base_path: Path) -> Path | None:
-    for relative in (
-        Path("cleaner"),
-        Path("final_rebuilt_auto"),
-        Path("original"),
+    if render_action_button(
+            "рџ”„ РџРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ",
+            key=f"retry_{file_id}",
+            disabled=disabled,
+            help="РЎР±СЂРѕСЃРёС‚СЊ РїСЂРѕРіСЂРµСЃСЃ Рё РЅР°С‡Р°С‚СЊ РѕР±СЂР°Р±РѕС‚РєСѓ Р·Р°РЅРѕРІРѕ" if not disabled else "Р¤Р°Р№Р» СѓР¶Рµ РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚СЃСЏ"
     ):
-        target = base_path / relative
-        if not target.exists():
-            continue
-        for suffix in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
-            match = next(target.rglob(suffix), None)
-            if match:
-                return match
-    return None
+        _handle_retry_action(file_id, file_data, redis_client)
+
+
+def _handle_retry_action(
+        file_id: str,
+        file_data: Dict[str, Any],  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data: Dict[str, Any]
+        redis_client: Any
+) -> None:
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РґРµР№СЃС‚РІРёСЏ РїРµСЂРµР·Р°РїСѓСЃРєР°."""
+    try:
+        # в†ђ FIX: РџРѕР»СѓС‡Р°РµРј С‚РµРєСѓС‰РµРµ РІСЂРµРјСЏ РѕРґРёРЅ СЂР°Р·
+        retry_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        updates = {
+            "status": FileStatus.PROCESSING.value,
+            "current_module": "preprocess",
+            "completed_modules": [],
+            "retry_count": file_data.get("retry_count", 0) + 1,
+            "errors": file_data.get("errors", []) + [f"Retry initiated at {retry_timestamp}"],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        job_data = {**file_data, **updates}
+
+        # в†ђ FIX: РЎРµСЂРёР°Р»РёР·СѓРµРј Рё РїР°СЂСЃРёРј С‡РµСЂРµР· from_payload РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё СЃС‚СЂРѕРє РІ Enum
+        payload = json.dumps(job_data, ensure_ascii=False)
+        job = FileJob.from_payload(payload)
+
+        if push_job_to_queue(redis_client, "preprocess", job.to_payload(), priority=10):
+            st.success("вњ… РћР±СЂР°Р±РѕС‚РєР° РїРµСЂРµР·Р°РїСѓС‰РµРЅР° СЃ РІС‹СЃРѕРєРёРј РїСЂРёРѕСЂРёС‚РµС‚РѕРј")
+            st.rerun()
+        else:
+            st.error("вќЊ РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ")
+
+    except Exception as e:
+        logger.error(f"РћС€РёР±РєР° РїСЂРё РїРµСЂРµР·Р°РїСѓСЃРєРµ РѕР±СЂР°Р±РѕС‚РєРё {file_id}: {e}", exc_info=True)
+        st.error(f"вќЊ РћС€РёР±РєР°: {e}")
+
+
+def _render_export_button(file_id: str, file_data: Dict[str, Any], redis_client) -> None:
+    """РљРЅРѕРїРєР° СЌРєСЃРїРѕСЂС‚Р° РІ 1РЎ."""
+    export_status = file_data.get("export_status", "")
+    file_status = file_data.get("status", "")
+
+    # Р‘Р»РѕРєРёСЂСѓРµРј РµСЃР»Рё: СѓР¶Рµ СЌРєСЃРїРѕСЂС‚РёСЂРѕРІР°РЅ, РІ РїСЂРѕС†РµСЃСЃРµ СЌРєСЃРїРѕСЂС‚Р°, РёР»Рё С„Р°Р№Р» РЅРµ Р·Р°РІРµСЂС€С‘РЅ
+    disabled = (
+            export_status == ExportStatus.SUCCESS.value or
+            export_status == ExportStatus.EXPORTING.value or
+            file_status != FileStatus.COMPLETED.value
+    )
+
+    help_text = "РћС‚РїСЂР°РІРёС‚СЊ С„Р°Р№Р» РЅР° СЌРєСЃРїРѕСЂС‚ РІ 1РЎ"
+    if export_status == ExportStatus.SUCCESS.value:
+        help_text = "вњ… РЈР¶Рµ СЌРєСЃРїРѕСЂС‚РёСЂРѕРІР°РЅ"
+    elif file_status != FileStatus.COMPLETED.value:
+        help_text = "вЏі РЎРЅР°С‡Р°Р»Р° Р·Р°РІРµСЂС€РёС‚Рµ РѕР±СЂР°Р±РѕС‚РєСѓ С„Р°Р№Р»Р°"
+
+    if render_action_button(
+            "рџ“¤ Р­РєСЃРїРѕСЂС‚ РІ 1РЎ",
+            key=f"export_{file_id}",
+            disabled=disabled,
+            help=help_text
+    ):
+        _handle_export_action(file_id, file_data, redis_client)
+
+
+def _handle_export_action(
+        file_id: str,
+        file_data: Dict[str, Any],  # в†ђ РРЎРџР РђР’Р›Р•РќРћ: file_data: Dict[str, Any]
+        redis_client: Any
+) -> None:
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РґРµР№СЃС‚РІРёСЏ СЌРєСЃРїРѕСЂС‚Р°."""
+    try:
+        updates = {
+            "export_status": ExportStatus.EXPORTING.value,
+            "export_attempts": file_data.get("export_attempts", 0) + 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if not safe_update_file_status(redis_client, file_id, updates):
+            st.error("вќЊ РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚СѓСЃ СЌРєСЃРїРѕСЂС‚Р°")
+            return
+
+        # в†ђ FIX: РЎРѕР·РґР°С‘Рј Job С‡РµСЂРµР· from_payload
+        job_data = {**file_data, **updates}
+        payload = json.dumps(job_data, ensure_ascii=False)  # в†ђ FIX: Р±С‹Р»Рѕ ensure_allow_ascii
+        job = FileJob.from_payload(payload)
+
+        if push_job_to_queue(redis_client, "export", job.to_payload(), priority=5):
+            st.success("вњ… Р­РєСЃРїРѕСЂС‚ Р·Р°РїСѓС‰РµРЅ")
+            st.rerun()
+        else:
+            st.error("вќЊ РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°РґР°С‡Сѓ СЌРєСЃРїРѕСЂС‚Р° РІ РѕС‡РµСЂРµРґСЊ")
+
+    except Exception as e:
+        logger.error(f"РћС€РёР±РєР° РїСЂРё Р·Р°РїСѓСЃРєРµ СЌРєСЃРїРѕСЂС‚Р° {file_id}: {e}", exc_info=True)
+        st.error(f"вќЊ РћС€РёР±РєР°: {e}")
+
+
+def _render_delete_button(file_id: str, redis_client) -> None:
+    """РљРЅРѕРїРєР° СѓРґР°Р»РµРЅРёСЏ С„Р°Р№Р»Р° СЃ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµРј."""
+    if render_action_button(
+            "рџ—‘пёЏ РЈРґР°Р»РёС‚СЊ",
+            key=f"delete_{file_id}",
+            type="secondary",
+            help="вљ пёЏ Р‘РµР·РІРѕР·РІСЂР°С‚РЅРѕ СѓРґР°Р»РёС‚СЊ С„Р°Р№Р» Рё РІСЃРµ Р°СЂС‚РµС„Р°РєС‚С‹"
+    ):
+        # РџРѕРєР°Р·С‹РІР°РµРј РјРѕРґР°Р»СЊРЅРѕРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ
+        st.warning("вљ пёЏ РџРѕРґС‚РІРµСЂРґРёС‚Рµ СѓРґР°Р»РµРЅРёРµ")
+        col_yes, col_no = st.columns(2)
+
+        with col_yes:
+            if st.button("вњ… Р”Р°, СѓРґР°Р»РёС‚СЊ", key=f"confirm_delete_{file_id}", type="primary"):
+                _handle_delete_action(file_id, redis_client)
+
+        with col_no:
+            if st.button("вќЊ РћС‚РјРµРЅР°", key=f"cancel_delete_{file_id}"):
+                st.rerun()
+
+
+def _handle_delete_action(file_id: str, redis_client) -> None:
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РґРµР№СЃС‚РІРёСЏ СѓРґР°Р»РµРЅРёСЏ."""
+    try:
+        # РЈРґР°Р»СЏРµРј СЃС‚Р°С‚СѓСЃ РёР· Redis
+        if redis_client.delete_file_status(file_id):
+            st.success("вњ… Р¤Р°Р№Р» СѓРґР°Р»С‘РЅ РёР· СЂРµРµСЃС‚СЂР°")
+            # Р’РѕР·РІСЂР°С‰Р°РµРј Рє СЃРїРёСЃРєСѓ
+            st.session_state.current_page = "main"
+            st.session_state.editing_file_index = None
+            st.rerun()
+        else:
+            st.error("вќЊ РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ С„Р°Р№Р»")
+
+    except Exception as e:
+        logger.error(f"РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё С„Р°Р№Р»Р° {file_id}: {e}", exc_info=True)
+        st.error(f"вќЊ РћС€РёР±РєР°: {e}")

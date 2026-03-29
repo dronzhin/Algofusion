@@ -1,113 +1,60 @@
-"""Streamlit entrypoint for the document processing UI."""
+# ui/app.py
+"""
+Точка входа UI приложения Algofusion File Processor.
+С оптимизациями производительности и вынесенным состоянием.
+"""
 
-from __future__ import annotations
-
+# ============================================================================
+# 1. СТАНДАРТНЫЕ ИМПОРТЫ (без st.*)
+# ============================================================================
 import sys
 from pathlib import Path
 
+# Настройка путей
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# ============================================================================
+# 2. STREAMLIT И set_page_config - ПЕРВЫЙ st.* вызов!
+# ============================================================================
 import streamlit as st
 
 st.set_page_config(
-    page_title="Algofusion",
-    page_icon="A",
+    page_title="Algofusion File Processor",
+    page_icon="📂",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://github.com/algofusion',
+        'Report a bug': 'https://github.com/algofusion/issues',
+        'About': "# Algofusion File Processor v0.1.0"
+    }
 )
 
-from shared.config.settings import get_settings
+# ============================================================================
+# 3. ВСЕ ОСТАЛЬНЫЕ ИМПОРТЫ
+# ============================================================================
 from shared.utils.logger import setup_logger
-from ui.cache import CacheManager, get_redis_client_cached
-from ui.pages.file_detail_page import render_file_detail_page
+from shared.config.settings import get_settings
+from ui.state import get_session_state, SessionState
+from ui.cache import (
+    get_redis_client_cached,
+    CacheManager
+)
 from ui.pages.main_page import render_main_page
-from ui.state import SessionState, get_session_state
+from ui.pages.file_detail_page import render_file_detail_page
 
+# Инициализация логгера
 logger = setup_logger("ui.app")
 
 
-def _inject_theme() -> None:
-    st.markdown(
-        """
-        <style>
-        :root {
-            --af-bg: #f5f1e8;
-            --af-card: #fffdf8;
-            --af-border: #ddd4c4;
-            --af-text: #2f2b26;
-            --af-muted: #736b63;
-            --af-primary: #486f67;
-            --af-primary-2: #c46a3a;
-            --af-ok: #2f6b55;
-            --af-warn: #8a5a20;
-            --af-bad: #8b3d34;
-        }
+# ============================================================================
+# 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
 
-        .stApp {
-            background:
-                radial-gradient(circle at top right, rgba(196,106,58,0.08), transparent 22%),
-                radial-gradient(circle at left top, rgba(72,111,103,0.10), transparent 26%),
-                var(--af-bg);
-            color: var(--af-text);
-        }
-
-        .block-container {
-            padding-top: 1.4rem;
-            padding-bottom: 2rem;
-        }
-
-        section[data-testid="stSidebar"] {
-            background: rgba(255, 253, 248, 0.82);
-            border-right: 1px solid var(--af-border);
-        }
-
-        div[data-testid="stMetric"] {
-            background: var(--af-card);
-            border: 1px solid var(--af-border);
-            border-radius: 16px;
-            padding: 0.9rem 1rem;
-        }
-
-        div[data-testid="stVerticalBlock"] div[data-testid="stButton"] > button {
-            border-radius: 12px;
-            border: 1px solid var(--af-border);
-            background: var(--af-card);
-            color: var(--af-text);
-            font-weight: 600;
-        }
-
-        div[data-testid="stVerticalBlock"] div[data-testid="stButton"] > button[kind="primary"] {
-            background: var(--af-primary-2);
-            color: white;
-            border-color: var(--af-primary-2);
-        }
-
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 0.5rem;
-        }
-
-        .stTabs [data-baseweb="tab"] {
-            background: rgba(255,253,248,0.8);
-            border: 1px solid var(--af-border);
-            border-radius: 12px;
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-
-        .stTabs [aria-selected="true"] {
-            background: white;
-            border-color: var(--af-primary);
-            color: var(--af-primary);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _process_redis_events(session: SessionState) -> None:
+def _process_redis_events(session: SessionState):
+    """Обработка событий из Redis Pub/Sub (неблокирующая)."""
     try:
         redis_client = session.redis_client
         if not redis_client:
@@ -117,55 +64,73 @@ def _process_redis_events(session: SessionState) -> None:
             session.pubsub = redis_client.subscribe(["files:events", "1c:export"])
 
         message = session.pubsub.get_message(timeout=0.1)
-        if not message or message["type"] != "message":
-            return
+        if message and message["type"] == "message":
+            import json
+            event = json.loads(message["data"])
+            event_type = event.get("type", "unknown")
 
-        import json
+            # Обработка событий
+            if event_type == "file_uploaded":
+                session.add_log("ОК", f"📁 Новый файл: {event.get('filename')}")
+                CacheManager.clear_data_cache()  # Инвалидация кэша
+            elif event_type == "module_completed":
+                session.add_log("ОК", f"✅ Модуль {event.get('module')} завершён")
+                CacheManager.clear_data_cache()
+            elif event_type == "file_error":
+                session.add_log("ERROR", f"❌ Ошибка: {event.get('error')}")
+            elif event_type == "export_completed":
+                session.add_log("ОК", f"📤 Экспорт в 1С завершён")
+                CacheManager.clear_data_cache()
 
-        event = json.loads(message["data"])
-        event_type = event.get("type", event.get("event", "unknown"))
-
-        if event_type == "file_uploaded":
-            session.add_log("OK", f"Новый файл: {event.get('filename')}")
-            CacheManager.clear_data_cache()
-        elif event_type == "module_completed":
-            session.add_log("OK", f"Этап завершен: {event.get('module')}")
-            CacheManager.clear_data_cache()
-        elif event_type == "file_error":
-            session.add_log("ERROR", f"Ошибка: {event.get('error')}")
-        elif event_type == "export_completed":
-            session.add_log("OK", "Выгрузка в 1С завершена")
-            CacheManager.clear_data_cache()
-    except Exception as exc:
-        logger.warning("Redis event processing failed: %s", exc)
+    except Exception as e:
+        logger.warning(f"Ошибка обработки событий Redis: {e}")
 
 
-def _render_shell_header(session: SessionState) -> None:
-    left, right = st.columns([4, 1], gap="large")
-    with left:
-        st.markdown("## Algofusion")
-        st.caption("Сервис распознавания, проверки и подготовки документов к выгрузке в 1С.")
-    with right:
+def _render_header(session: SessionState):
+    """Рендерит заголовок приложения."""
+    col1, col2, col3 = st.columns([3, 1, 1])
+
+    with col1:
+        st.title("📂 Algofusion File Processor")
+
+    with col2:
+        st.metric("Время работы", session.get_uptime())
+
+    with col3:
         if session.last_refresh:
             st.caption(f"Обновлено: {session.last_refresh.strftime('%H:%M:%S')}")
 
 
-def _render_footer() -> None:
+def _render_footer():
+    """Рендерит футер приложения."""
     st.divider()
-    left, right = st.columns([4, 1])
-    with left:
-        st.caption("Algofusion operator workspace")
-    with right:
-        if st.button("Очистить кэш", use_container_width=True):
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.caption("© 2025 Algofusion")
+
+    with col2:
+        st.caption(f"Версия: {get_settings().log_level}")
+
+    with col3:
+        if st.button("🗑️ Очистить кэш", key="clear_cache_btn"):
             CacheManager.clear_all()
+            st.success("✅ Кэш очищен")
             st.rerun()
 
 
-def main() -> None:
-    logger.info("UI started")
-    _inject_theme()
+# ============================================================================
+# 5. ОСНОВНАЯ ФУНКЦИЯ
+# ============================================================================
 
+def main():
+    """Основная функция приложения."""
+    logger.info("Приложение запущено")
+
+    # Инициализация состояния
     session = get_session_state()
+
+    # Инициализация сервисов (кэшированная)
     if session.redis_client is None:
         session.redis_client = get_redis_client_cached()
 
@@ -173,22 +138,30 @@ def main() -> None:
     session.settings = settings
 
     from core.services.file_service import FileService
-
     if session.file_service is None:
         session.file_service = FileService(settings.shared_files_path)
 
+    # Обработка событий Redis
     _process_redis_events(session)
-    _render_shell_header(session)
 
+    # Заголовок
+    _render_header(session)
+
+    # Маршрутизация
     try:
-        if session.current_page == "detail":
+        if session.current_page == "main":
+            render_main_page(session)
+        elif session.current_page == "detail":
             render_file_detail_page(session)
         else:
+            st.error(f"❌ Неизвестная страница: {session.current_page}")
+            session.navigate("main")
             render_main_page(session)
-    except Exception as exc:
-        logger.error("UI rendering failed: %s", exc, exc_info=True)
-        st.error(f"Ошибка интерфейса: {exc}")
+    except Exception as e:
+        logger.error(f"Ошибка рендеринга страницы: {e}", exc_info=True)
+        st.error(f"❌ Критическая ошибка: {e}")
 
+    # Футер
     _render_footer()
 
 

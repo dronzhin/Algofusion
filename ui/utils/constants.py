@@ -1,91 +1,55 @@
-"""Shared UI constants for the operator interface."""
+# ui/utils/constants.py
+"""
+Централизованные константы для UI.
+Устраняет дублирование строк по всему коду.
+"""
 
-MODULES_ORDER = [
-    "cleaner",
-    "layout",
-    "ocr",
-    "parser",
-    "normalizer",
-    "reconcile",
-    "final_json",
-]
+# Порядок модулей обработки
+MODULES_ORDER = ["preprocess", "ocr", "llm", "export"]
 
-MODULE_LABELS = {
-    "cleaner": "Очистка",
-    "layout": "Разметка",
-    "ocr": "OCR",
-    "parser": "Извлечение",
-    "normalizer": "Нормализация",
-    "reconcile": "Проверка сумм",
-    "final_json": "Финальный JSON",
-}
-
+# Конфигурация статусов файлов
 FILE_STATUS_CONFIG = {
-    "uploaded": {
-        "emoji": "•",
-        "label": "Загружен",
-        "color": "#375B7A",
-        "bg": "#DDE9F2",
-    },
-    "processing": {
-        "emoji": "•",
-        "label": "В обработке",
-        "color": "#8A5A20",
-        "bg": "#F4E7CB",
-    },
-    "completed": {
-        "emoji": "•",
-        "label": "Готов",
-        "color": "#2F6B55",
-        "bg": "#DCEBE3",
-    },
-    "failed": {
-        "emoji": "•",
-        "label": "Ошибка",
-        "color": "#8B3D34",
-        "bg": "#F3DDDA",
-    },
-    "exported": {
-        "emoji": "•",
-        "label": "Выгружен",
-        "color": "#5C4B7C",
-        "bg": "#E7E1F1",
-    },
+    "uploaded": {"emoji": "🔵", "label": "Загружен", "color": "#004085", "bg": "#cce5ff"},
+    "processing": {"emoji": "🟡", "label": "В обработке", "color": "#856404", "bg": "#fff3cd"},
+    "completed": {"emoji": "🟢", "label": "Завершён", "color": "#155724", "bg": "#d4edda"},
+    "failed": {"emoji": "🔴", "label": "Ошибка", "color": "#721c24", "bg": "#f8d7da"},
+    "exported": {"emoji": "🟣", "label": "Экспортирован", "color": "#5a3d7a", "bg": "#e2d5f1"},
 }
 
+# Конфигурация статусов экспорта
 EXPORT_STATUS_CONFIG = {
-    "pending": {"emoji": "•", "label": "Ожидает"},
-    "exporting": {"emoji": "•", "label": "Выгружается"},
-    "success": {"emoji": "•", "label": "Успешно"},
-    "failed": {"emoji": "•", "label": "Ошибка"},
+    "pending": {"emoji": "⏳", "label": "Ожидает"},
+    "exporting": {"emoji": "🔄", "label": "Экспортируется"},
+    "success": {"emoji": "✅", "label": "Успешно"},
+    "failed": {"emoji": "❌", "label": "Ошибка"},
 }
 
+# Конфигурация логов
 LOG_STATUS_CONFIG = {
-    "OK": {"emoji": "[OK]", "color": "#2F6B55"},
-    "ERROR": {"emoji": "[ERR]", "color": "#8B3D34"},
-    "WARNING": {"emoji": "[WARN]", "color": "#8A5A20"},
-    "INFO": {"emoji": "[INFO]", "color": "#5E5A52"},
+    "OK": {"emoji": "✅", "color": "#28a745"},
+    "ERROR": {"emoji": "❌", "color": "#dc3545"},
+    "WARNING": {"emoji": "⚠️", "color": "#ffc107"},
+    "INFO": {"emoji": "ℹ️", "color": "#6c757d"},
 }
 
+# Настройки отображения
 UI_CONFIG = {
-    "max_files_display": 100,
-    "max_logs_display": 12,
-    "max_processing_display": 8,
-    "datetime_format_short": "%d.%m.%Y %H:%M",
-    "datetime_format_full": "%d.%m.%Y %H:%M:%S",
+    "max_files_display": 50,      # Макс. файлов в списке
+    "max_logs_display": 20,       # Макс. логов в просмотрщике
+    "max_processing_display": 10, # Макс. файлов в прогрессе
+    "datetime_format_short": "%Y-%m-%d %H:%M",
+    "datetime_format_full": "%Y-%m-%d %H:%M:%S",
 }
 
+# Redis каналы и очереди (для консистентности с бэкендом)
 REDIS_CHANNELS = {
     "events": "files:events",
     "export": "1c:export",
 }
 
 REDIS_QUEUES = {
-    "cleaner": "files:cleaner",
-    "layout": "files:layout",
+    "preprocess": "files:preprocess",
     "ocr": "files:ocr",
-    "parser": "files:parser",
-    "normalizer": "files:normalizer",
-    "reconcile": "files:reconcile",
-    "final_json": "files:final_json",
+    "llm": "files:llm",
+    "export": "files:export",
 }
