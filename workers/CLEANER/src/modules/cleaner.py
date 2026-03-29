@@ -7,7 +7,7 @@ import time
 import cv2
 import numpy as np
 from pdf2image import convert_from_path
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from src.config import config
 from src.logger import get_logger
@@ -133,99 +133,45 @@ def fit_to_a4_canvas(input_img: Image.Image, target_dpi: int = 600) -> Image.Ima
     return canvas
 
 
-def detect_skew_angle_by_hough_lines(
-    image: np.ndarray,
-) -> tuple[float, bool]:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(gray, config.hough_canny1, config.hough_canny2, apertureSize=3)
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180 / 4,
-        threshold=config.hough_threshold,
-        minLineLength=config.hough_min_line_length,
-        maxLineGap=config.hough_max_line_gap,
-    )
+def detect_rotation_angle_notebook_style(image_bgr: np.ndarray) -> tuple[float, bool]:
+    if image_bgr.ndim == 2:
+        gray = image_bgr
+    else:
+        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
 
-    angles: list[float] = []
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            angle = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-            if abs(angle) <= config.hough_max_abs_angle:
-                angles.append(angle)
-
-    if not angles:
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return 0.0, False
-    return float(np.median(angles)), True
 
-
-def detect_skew_angle_by_text_contours(image: np.ndarray) -> tuple[float, bool]:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    th = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
-        cv2.THRESH_BINARY_INV,
-        config.text_block_size,
-        config.text_c,
-    )
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (config.text_open_kernel, config.text_open_kernel))
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
-    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    angles: list[float] = []
-    for cnt in contours:
-        if cv2.contourArea(cnt) < config.text_min_contour_area:
-            continue
-        rect = cv2.minAreaRect(cnt)
-        angle = float(rect[-1])
-        if angle < -45:
-            angle = 90 + angle
-        angles.append(angle)
-
-    if not angles:
-        return 0.0, False
-    return float(np.median(angles)), True
-
-
-def detect_skew_angle(image: np.ndarray) -> float:
-    angle, reliable = detect_skew_angle_by_hough_lines(image)
-    if reliable:
-        return angle
-    angle, reliable = detect_skew_angle_by_text_contours(image)
-    if reliable:
-        return angle
-    return 0.0
+    max_contour = max(contours, key=cv2.contourArea)
+    rect = cv2.minAreaRect(max_contour)
+    angle = float(rect[-1])
+    if angle > 45:
+        angle = angle + 270
+    return angle, True
 
 
 def rotate_image_by_angle(image: np.ndarray, angle: float) -> np.ndarray:
     h, w = image.shape[:2]
     center = (w // 2, h // 2)
     matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-    return cv2.warpAffine(
-        image,
-        matrix,
-        (w, h),
-        flags=cv2.INTER_CUBIC,
-        borderMode=cv2.BORDER_REPLICATE,
-    )
+    return cv2.warpAffine(image, matrix, (w, h))
 
 
-def safe_rotate_image(image_bgr: np.ndarray) -> np.ndarray:
-    angle = detect_skew_angle(image_bgr)
-    if abs(angle) < config.rotate_min_abs_angle:
+def rotate_image_notebook_style(image_bgr: np.ndarray) -> np.ndarray:
+    angle, found = detect_rotation_angle_notebook_style(image_bgr)
+    if not found:
+        logger.info("Cleaner rotate: no contour found, skipping")
         return image_bgr
-    if abs(angle) > config.rotate_max_abs_angle:
-        logger.warning("Skipping rotate with suspicious angle: %.2f", angle)
+    if abs(angle) < config.rotate_min_abs_angle:
         return image_bgr
     logger.info("Cleaner rotate angle: %.2f", angle)
     return rotate_image_by_angle(image_bgr, angle)
 
 
 def preprocessing_stage_4_1(input_img: Image.Image) -> Image.Image:
-    arr = np.array(input_img).copy()
+    arr = np.array(input_img.convert("RGB")).copy()
     rgb = arr[..., :3]
     min_val = rgb.min(axis=2)
     max_val = rgb.max(axis=2)
@@ -237,7 +183,7 @@ def preprocessing_stage_4_1(input_img: Image.Image) -> Image.Image:
 
 
 def preprocessing_stage_4_2(input_img: Image.Image) -> Image.Image:
-    arr = np.array(input_img).copy()
+    arr = np.array(input_img.convert("RGB")).copy()
     rgb = arr[..., :3]
     min_val = rgb.min(axis=2)
     max_val = rgb.max(axis=2)
@@ -250,7 +196,7 @@ def preprocessing_stage_4_2(input_img: Image.Image) -> Image.Image:
 
 
 def preprocessing_stage_4_3(input_img: Image.Image) -> Image.Image:
-    arr = np.array(input_img).copy()
+    arr = np.array(input_img.convert("RGB")).copy()
     rgb = arr[..., :3]
     min_val = rgb.min(axis=2)
     max_val = rgb.max(axis=2)
@@ -261,38 +207,45 @@ def preprocessing_stage_4_3(input_img: Image.Image) -> Image.Image:
     return Image.fromarray(arr)
 
 
-def preprocessing_stage_5_2_binarization(input_img: Image.Image) -> Image.Image:
-    arr = np.array(input_img.convert("L"))
-    result = arr.copy()
-    result[result < config.bin_low_threshold] = 0
-    result[(result >= config.bin_low_threshold) & (result <= config.bin_mid_threshold)] = 128
-    result[result > config.bin_mid_threshold] = 255
+def preprocessing_stage_5_2_background(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img).copy()
+    arr[arr > config.background_threshold] = config.background_fill_value
+    return Image.fromarray(arr.astype(np.uint8))
+
+
+def preprocessing_stage_5_2_binary_and_denoise(input_img: Image.Image) -> Image.Image:
+    arr = np.array(input_img).copy()
+    arr[arr <= config.binary_threshold] = config.binary_foreground_value
+    arr[arr > config.binary_threshold] = config.binary_background_value
+    result = Image.fromarray(arr.astype(np.uint8))
 
     kernel = config.bin_median_kernel
     if kernel % 2 == 0:
         kernel += 1
 
-    result = result.astype(np.uint8)
     for _ in range(max(0, config.bin_median_passes)):
-        result = cv2.medianBlur(result, kernel)
-
-    return Image.fromarray(result)
+        result = result.filter(ImageFilter.MedianFilter(size=kernel))
+    return result
 
 
 def preprocess_page_bgr(
     image_bgr: np.ndarray,
     target_dpi: int = 600,
 ) -> np.ndarray:
-    rotated = safe_rotate_image(image_bgr)
-    rgb = cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     img = Image.fromarray(rgb)
     img = preprocessing_stage_4_1(img)
     img = preprocessing_stage_4_2(img)
     img = preprocessing_stage_4_3(img)
-    img = preprocessing_stage_5_2_binarization(img)
+    img = preprocessing_stage_5_2_background(img)
+    img = preprocessing_stage_5_2_binary_and_denoise(img)
+    processed_rgb = np.array(img.convert("RGB"))
+    processed_bgr = cv2.cvtColor(processed_rgb, cv2.COLOR_RGB2BGR)
+    rotated = rotate_image_notebook_style(processed_bgr)
+    img = Image.fromarray(cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB))
     if config.a4_canvas_enabled:
         img = fit_to_a4_canvas(img, target_dpi=target_dpi)
-    return np.array(img.convert("L"))
+    return cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
 
 
 def clean_page_bgr_exact(
