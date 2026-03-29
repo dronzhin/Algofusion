@@ -27,6 +27,7 @@ class CleanerModule(BaseModule):
         super().__init__(module_config)
         self.default_config = {
             "dpi": config.default_dpi,
+            "assumed_input_dpi": config.assumed_input_dpi,
             "output_dpi": config.output_dpi,
         }
         self.config = {**self.default_config, **(module_config or {})}
@@ -58,6 +59,7 @@ class CleanerModule(BaseModule):
                     "outputs": [str(path) for path in outputs],
                     "count": len(outputs),
                     "dpi": self.config["dpi"],
+                    "assumed_input_dpi": self.config["assumed_input_dpi"],
                     "output_dpi": self.config["output_dpi"],
                     "a4_canvas_enabled": config.a4_canvas_enabled,
                 }
@@ -86,6 +88,8 @@ class CleanerModule(BaseModule):
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
             cleaned = clean_page_bgr_exact(
                 bgr,
+                input_dpi=int(self.config["dpi"]),
+                working_dpi=int(self.config["dpi"]),
                 target_dpi=int(self.config["output_dpi"]),
             )
             output_path = output_dir / f"{input_path.stem}_p{idx:02d}_clean.png"
@@ -94,27 +98,40 @@ class CleanerModule(BaseModule):
         return outputs
 
     def _process_image(self, input_path: Path, output_path: Path) -> Path:
-        img = cv2.imread(str(input_path), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError(f"Cannot read image: {input_path}")
+        with Image.open(input_path) as source_img:
+            source_rgb = source_img.convert("RGB")
+            dpi_meta = source_img.info.get("dpi")
+            input_dpi = _extract_input_dpi(dpi_meta, fallback=int(self.config["assumed_input_dpi"]))
+
+        img = cv2.cvtColor(np.array(source_rgb), cv2.COLOR_RGB2BGR)
         cleaned = clean_page_bgr_exact(
             img,
+            input_dpi=input_dpi,
+            working_dpi=int(self.config["dpi"]),
             target_dpi=int(self.config["output_dpi"]),
         )
         cv2.imwrite(str(output_path), cleaned)
         return output_path
 
 
-def fit_to_a4_canvas(input_img: Image.Image, target_dpi: int = 600) -> Image.Image:
-    if target_dpi <= 0:
-        return input_img
-
+def get_a4_size(target_dpi: int = 600, is_portrait: bool = True) -> tuple[int, int]:
     portrait_size = (
         max(1, int(round(8.27 * target_dpi))),
         max(1, int(round(11.69 * target_dpi))),
     )
-    landscape_size = (portrait_size[1], portrait_size[0])
-    target_size = portrait_size if input_img.height >= input_img.width else landscape_size
+    if is_portrait:
+        return portrait_size
+    return portrait_size[1], portrait_size[0]
+
+
+def fit_to_a4_canvas(input_img: Image.Image, target_dpi: int = 600) -> Image.Image:
+    if target_dpi <= 0:
+        return input_img
+
+    target_size = get_a4_size(
+        target_dpi=target_dpi,
+        is_portrait=input_img.height >= input_img.width,
+    )
 
     scale = min(target_size[0] / input_img.width, target_size[1] / input_img.height)
     new_size = (
@@ -131,6 +148,40 @@ def fit_to_a4_canvas(input_img: Image.Image, target_dpi: int = 600) -> Image.Ima
     )
     canvas.paste(resized, offset)
     return canvas
+
+
+def normalize_to_working_dpi(
+    input_img: Image.Image,
+    input_dpi: int,
+    working_dpi: int,
+) -> Image.Image:
+    if working_dpi <= 0:
+        return input_img
+
+    safe_input_dpi = input_dpi if input_dpi > 0 else working_dpi
+    if safe_input_dpi == working_dpi:
+        return input_img
+
+    scale = working_dpi / float(safe_input_dpi)
+    new_size = (
+        max(1, int(round(input_img.width * scale))),
+        max(1, int(round(input_img.height * scale))),
+    )
+    if new_size == input_img.size:
+        return input_img
+    return input_img.resize(new_size, resample=Image.LANCZOS)
+
+
+def _extract_input_dpi(dpi_meta: object, fallback: int) -> int:
+    if isinstance(dpi_meta, tuple) and dpi_meta:
+        try:
+            value = float(dpi_meta[0])
+            return int(round(value)) if value > 0 else fallback
+        except (TypeError, ValueError):
+            return fallback
+    if isinstance(dpi_meta, (int, float)):
+        return int(round(dpi_meta)) if float(dpi_meta) > 0 else fallback
+    return fallback
 
 
 def detect_rotation_angle_notebook_style(image_bgr: np.ndarray) -> tuple[float, bool]:
@@ -241,10 +292,13 @@ def preprocessing_stage_5_2_binary_and_denoise(input_img: Image.Image) -> Image.
 
 def preprocess_page_bgr(
     image_bgr: np.ndarray,
+    input_dpi: int = 600,
+    working_dpi: int = 600,
     target_dpi: int = 600,
 ) -> np.ndarray:
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     img = Image.fromarray(rgb)
+    img = normalize_to_working_dpi(img, input_dpi=input_dpi, working_dpi=working_dpi)
     img = preprocessing_stage_4_1(img)
     img = preprocessing_stage_4_2(img)
     img = preprocessing_stage_4_3(img)
@@ -261,6 +315,13 @@ def preprocess_page_bgr(
 
 def clean_page_bgr_exact(
     img_bgr: np.ndarray,
+    input_dpi: int = 600,
+    working_dpi: int = 600,
     target_dpi: int = 600,
 ) -> np.ndarray:
-    return preprocess_page_bgr(img_bgr, target_dpi=target_dpi)
+    return preprocess_page_bgr(
+        img_bgr,
+        input_dpi=input_dpi,
+        working_dpi=working_dpi,
+        target_dpi=target_dpi,
+    )

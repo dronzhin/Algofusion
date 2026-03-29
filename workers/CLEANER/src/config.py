@@ -15,6 +15,7 @@ class Config:
     shared_files_dir: Path = field(default_factory=lambda: Path(os.getenv("SHARED_FILES_DIR", "/shared/files")))
 
     default_dpi: int = field(default_factory=lambda: int(os.getenv("CLEANER_DPI", "600")))
+    assumed_input_dpi: int = field(default_factory=lambda: int(os.getenv("CLEANER_ASSUMED_INPUT_DPI", "300")))
     output_dpi: int = field(default_factory=lambda: int(os.getenv("CLEANER_OUTPUT_DPI", "600")))
     a4_canvas_enabled: bool = field(default_factory=lambda: os.getenv("CLEANER_A4_CANVAS_ENABLED", "true").lower() in {"1", "true", "yes", "on"})
     rotate_min_abs_angle: float = field(default_factory=lambda: float(os.getenv("CLEANER_ROTATE_MIN_ABS_ANGLE", "0.0")))
