@@ -45,10 +45,6 @@ class FileMonitor:
         self.redis = get_redis_client()
 
         self._file_cache: dict[str, tuple[float, float, int]] = {}
-        self.state_dir = self.shared_path / ".monitor_state"
-        self.state_file = self.state_dir / "processed_files.json"
-        self.processed_index: dict[str, dict[str, object]] = {}
-        self._load_persistent_state()
 
         logger.info(
             f"FileMonitor Р С‘Р Р…Р С‘РЎвЂ Р С‘Р В°Р В»Р С‘Р В·Р С‘РЎР‚Р С•Р Р†Р В°Р Р…: "
@@ -245,20 +241,6 @@ class FileMonitor:
 
                 file_stat = item.stat()
                 cache_key = f"{item.name}:{file_stat.st_mtime}:{file_stat.st_size}"
-                persistent_key = self._build_persistent_fingerprint(item, file_stat)
-
-                if persistent_key in self.processed_index:
-                    storage_dir = self.processed_index[persistent_key].get("storage_dir", "unknown")
-                    logger.info(f"Skipping already imported file: {item.name} -> {storage_dir}")
-                    self.processed_files.add(cache_key)
-                    continue
-
-                existing_storage = self._find_existing_import(item, file_stat)
-                if existing_storage:
-                    logger.info(f"Skipping file already present in shared storage: {item.name} -> {existing_storage}")
-                    self.processed_files.add(cache_key)
-                    self._remember_processed_file(item, file_stat, file_id="existing", storage_dir=existing_storage)
-                    continue
 
                 if cache_key not in self.processed_files:
                     logger.info(f"Р С›Р В±Р Р…Р В°РЎР‚РЎС“Р В¶Р ВµР Р… Р Р…Р С•Р Р†РЎвЂ№Р в„– РЎвЂћР В°Р в„–Р В»: {item.name} ({file_stat.st_size} Р В±Р В°Р в„–РЎвЂљ)")
@@ -287,11 +269,9 @@ class FileMonitor:
             # РІвЂ С’ FIX: Р РЋР С•Р В·Р Т‘Р В°РЎвЂР С РЎРѓРЎвЂљРЎР‚РЎС“Р С”РЎвЂљРЎС“РЎР‚РЎС“ РЎРѓ РЎРЏР Р†Р Р…РЎвЂ№Р СР С‘ Р С—РЎР‚Р В°Р Р†Р В°Р СР С‘
             stem = Path(file_path.name).stem
             storage_dir = stem
-            suffix = 2
-            while (self.shared_path / storage_dir).exists():
-                storage_dir = f"{stem}__{suffix}"
-                suffix += 1
             base_dir = self.shared_path / storage_dir
+            if base_dir.exists():
+                shutil.rmtree(base_dir)
             original_dir = base_dir / "original"
             safe_mkdir(original_dir, mode=0o755)
 
@@ -304,7 +284,6 @@ class FileMonitor:
                 return False
 
             shutil.copy2(file_path, dest_path)
-            source_stat = file_path.stat()
 
             # РІвЂ С’ FIX: Р Р‡Р Р†Р Р…Р С• РЎС“РЎРѓРЎвЂљР В°Р Р…Р В°Р Р†Р В»Р С‘Р Р†Р В°Р ВµР С Р С—РЎР‚Р В°Р Р†Р В° Р Р…Р В° РЎРѓР С”Р С•Р С—Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р Р…РЎвЂ№Р в„– РЎвЂћР В°Р в„–Р В»
             try:
@@ -349,7 +328,6 @@ class FileMonitor:
             })
 
             logger.info(f"Р В¤Р В°Р в„–Р В» {file_id} Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р… Р Р† Р С•РЎвЂЎР ВµРЎР‚Р ВµР Т‘РЎРЉ Р С•Р В±РЎР‚Р В°Р В±Р С•РЎвЂљР С”Р С‘")
-            self._remember_processed_file(file_path, source_stat, file_id=file_id, storage_dir=storage_dir)
             return True
 
         except PermissionError as e:
