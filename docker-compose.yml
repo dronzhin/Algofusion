@@ -77,12 +77,36 @@ services:
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CLEANER_QUEUE=files:cleaner
-      - NEXT_QUEUE=files:layout
-      - SHARED_FILES_DIR=/shared/files
-      - LOG_LEVEL=INFO
-      - PYTHONPATH=/app
+        - REDIS_URL=redis://redis:6379/0
+        - CLEANER_QUEUE=files:cleaner
+        - NEXT_QUEUE=files:layout
+        - SHARED_FILES_DIR=/shared/files
+        - CLEANER_DPI=600
+        - CLEANER_OUTPUT_DPI=200
+        - CLEANER_ROTATE_MIN_ABS_ANGLE=0.1
+        - CLEANER_ROTATE_MAX_ABS_ANGLE=20.0
+        - CLEANER_HOUGH_CANNY1=50
+        - CLEANER_HOUGH_CANNY2=150
+        - CLEANER_HOUGH_THRESHOLD=150
+        - CLEANER_HOUGH_MIN_LINE_LENGTH=200
+        - CLEANER_HOUGH_MAX_LINE_GAP=20
+        - CLEANER_HOUGH_MAX_ABS_ANGLE=20.0
+        - CLEANER_TEXT_BLOCK_SIZE=31
+        - CLEANER_TEXT_C=15
+        - CLEANER_TEXT_OPEN_KERNEL=5
+        - CLEANER_TEXT_MIN_CONTOUR_AREA=2000
+        - CLEANER_STAGE41_DIFF_MIN=1
+        - CLEANER_STAGE41_DIFF_MAX=11
+        - CLEANER_STAGE42_DIFF_MIN=12
+        - CLEANER_STAGE42_DIFF_MAX=32
+        - CLEANER_STAGE43_DIFF_MIN=33
+        - CLEANER_STAGE43_DIFF_MAX=255
+        - CLEANER_BIN_LOW_THRESHOLD=96
+        - CLEANER_BIN_MID_THRESHOLD=128
+        - CLEANER_BIN_MEDIAN_KERNEL=3
+        - CLEANER_BIN_MEDIAN_PASSES=3
+        - LOG_LEVEL=INFO
+        - PYTHONPATH=/app
     depends_on:
       redis:
         condition: service_healthy

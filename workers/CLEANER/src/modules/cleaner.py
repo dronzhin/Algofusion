@@ -133,23 +133,17 @@ def _read_image_dpi(input_path: Path, fallback_dpi: int) -> int:
 
 def detect_skew_angle_by_hough_lines(
     image: np.ndarray,
-    canny1: int = 50,
-    canny2: int = 150,
-    hough_threshold: int = 150,
-    min_line_length: int = 200,
-    max_line_gap: int = 20,
-    max_abs_angle: float = 20.0,
 ) -> tuple[float, bool]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(gray, canny1, canny2, apertureSize=3)
+    edges = cv2.Canny(gray, config.hough_canny1, config.hough_canny2, apertureSize=3)
     lines = cv2.HoughLinesP(
         edges,
         rho=1,
         theta=np.pi / 180 / 4,
-        threshold=hough_threshold,
-        minLineLength=min_line_length,
-        maxLineGap=max_line_gap,
+        threshold=config.hough_threshold,
+        minLineLength=config.hough_min_line_length,
+        maxLineGap=config.hough_max_line_gap,
     )
 
     angles: list[float] = []
@@ -157,7 +151,7 @@ def detect_skew_angle_by_hough_lines(
         for line in lines:
             x1, y1, x2, y2 = line[0]
             angle = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
-            if abs(angle) <= max_abs_angle:
+            if abs(angle) <= config.hough_max_abs_angle:
                 angles.append(angle)
 
     if not angles:
@@ -172,16 +166,16 @@ def detect_skew_angle_by_text_contours(image: np.ndarray) -> tuple[float, bool]:
         255,
         cv2.ADAPTIVE_THRESH_MEAN_C,
         cv2.THRESH_BINARY_INV,
-        31,
-        15,
+        config.text_block_size,
+        config.text_c,
     )
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (config.text_open_kernel, config.text_open_kernel))
     th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     angles: list[float] = []
     for cnt in contours:
-        if cv2.contourArea(cnt) < 2000:
+        if cv2.contourArea(cnt) < config.text_min_contour_area:
             continue
         rect = cv2.minAreaRect(cnt)
         angle = float(rect[-1])
@@ -217,11 +211,11 @@ def rotate_image_by_angle(image: np.ndarray, angle: float) -> np.ndarray:
     )
 
 
-def safe_rotate_image(image_bgr: np.ndarray, max_abs_angle: float = 20.0) -> np.ndarray:
+def safe_rotate_image(image_bgr: np.ndarray) -> np.ndarray:
     angle = detect_skew_angle(image_bgr)
-    if abs(angle) < 0.1:
+    if abs(angle) < config.rotate_min_abs_angle:
         return image_bgr
-    if abs(angle) > max_abs_angle:
+    if abs(angle) > config.rotate_max_abs_angle:
         logger.warning("Skipping rotate with suspicious angle: %.2f", angle)
         return image_bgr
     logger.info("Cleaner rotate angle: %.2f", angle)
@@ -234,7 +228,7 @@ def preprocessing_stage_4_1(input_img: Image.Image) -> Image.Image:
     min_val = rgb.min(axis=2)
     max_val = rgb.max(axis=2)
     diff = max_val - min_val
-    mask = (diff >= 1) & (diff <= 11)
+    mask = (diff >= config.stage41_diff_min) & (diff <= config.stage41_diff_max)
     rgb[mask] = np.stack([min_val[mask], min_val[mask], min_val[mask]], axis=1)
     arr[..., :3] = rgb
     return Image.fromarray(arr)
@@ -247,7 +241,7 @@ def preprocessing_stage_4_2(input_img: Image.Image) -> Image.Image:
     max_val = rgb.max(axis=2)
     diff = max_val - min_val
     gray_value = ((min_val.astype(np.uint16) + max_val.astype(np.uint16)) // 2).astype(np.uint8)
-    mask = (diff >= 12) & (diff <= 32)
+    mask = (diff >= config.stage42_diff_min) & (diff <= config.stage42_diff_max)
     rgb[mask] = np.stack([gray_value[mask], gray_value[mask], gray_value[mask]], axis=1)
     arr[..., :3] = rgb
     return Image.fromarray(arr)
@@ -259,7 +253,7 @@ def preprocessing_stage_4_3(input_img: Image.Image) -> Image.Image:
     min_val = rgb.min(axis=2)
     max_val = rgb.max(axis=2)
     diff = max_val - min_val
-    mask = (diff >= 33) & (diff <= 255)
+    mask = (diff >= config.stage43_diff_min) & (diff <= config.stage43_diff_max)
     rgb[mask] = np.stack([max_val[mask], max_val[mask], max_val[mask]], axis=1)
     arr[..., :3] = rgb
     return Image.fromarray(arr)
@@ -268,12 +262,18 @@ def preprocessing_stage_4_3(input_img: Image.Image) -> Image.Image:
 def preprocessing_stage_5_2_binarization(input_img: Image.Image) -> Image.Image:
     arr = np.array(input_img.convert("L"))
     result = arr.copy()
-    result[result < 96] = 0
-    result[(result >= 96) & (result <= 128)] = 128
-    result[result > 128] = 255
-    result = cv2.medianBlur(result.astype(np.uint8), 3)
-    result = cv2.medianBlur(result, 3)
-    result = cv2.medianBlur(result, 3)
+    result[result < config.bin_low_threshold] = 0
+    result[(result >= config.bin_low_threshold) & (result <= config.bin_mid_threshold)] = 128
+    result[result > config.bin_mid_threshold] = 255
+
+    kernel = config.bin_median_kernel
+    if kernel % 2 == 0:
+        kernel += 1
+
+    result = result.astype(np.uint8)
+    for _ in range(max(0, config.bin_median_passes)):
+        result = cv2.medianBlur(result, kernel)
+
     return Image.fromarray(result)
 
 
