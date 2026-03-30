@@ -18,16 +18,17 @@ ENV PYTHONUNBUFFERED=1 \
     PROCESSOR_ROT_ANGLE_THRESH=0.5 \
     PROCESSOR_ROT_SCALE=1.0
 
-# === Системные зависимости ===
+# === Системные зависимости (обновлённые для Debian 12+) ===
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Для pdf2image (конвертация PDF)
     poppler-utils \
-    # Для OpenCV (поворот изображений)
-    libgl1-mesa-glx \
+    # Для OpenCV (поворот изображений) — обновлённые имена пакетов
+    libgl1 \
     libglib2.0-0 \
     # Утилиты для отладки
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ldconfig  # ← Обновляем кэш библиотек
 
 # Рабочая директория
 WORKDIR /app
@@ -38,7 +39,8 @@ RUN pip install -r requirements.txt
 
 # === Копируем ОБЩИЙ код (нужен всем контейнерам) ===
 COPY shared/ ./shared/
-COPY core/ ./core/
+COPY core/services/redis_client.py ./core/services/redis_client.py
+COPY core/services/file_service.py ./core/services/file_service.py
 
 # === Копируем КОД ПРОЦЕССОРА (явно, игнорируя глобальный .dockerignore) ===
 COPY workers/Preprocess/src/ ./workers/Preprocess/src/
