@@ -73,10 +73,19 @@ class Settings:
         """Проверка валидности настроек."""
         errors = []
 
+        # === Инфраструктура (критично для всех модулей) ===
         if not self.redis_host:
             errors.append("REDIS_HOST не установлен")
+        if not self.redis_port:
+            errors.append("REDIS_PORT не установлен")
+        if not self.shared_files_path:
+            errors.append("SHARED_FILES_PATH не установлен")
+
+        # === Монитор (специфика) ===
         if self.monitor_interval < 5:
             errors.append("MONITOR_INTERVAL должен быть >= 5 секунд")
+
+        # === UI (специфика) ===
         if not (5 <= self.ui_auto_refresh_min_sec <= self.ui_auto_refresh_max_sec <= 300):
             errors.append("UI_AUTO_REFRESH: MIN должен быть >=5, MAX <=300, MIN <= MAX")
         if not (self.ui_auto_refresh_min_sec <= self.ui_auto_refresh_interval_sec <= self.ui_auto_refresh_max_sec):
@@ -84,10 +93,11 @@ class Settings:
 
         if errors:
             for error in errors:
-                logger.error(f"Ошибка валидации: {error}")
+                logger.error(f"❌ Ошибка валидации настроек: {error}")
+            logger.error("💡 Проверьте переменные окружения в docker-compose.yml или .env")
             return False
 
-        logger.info("Настройки валидированы успешно")
+        logger.info("✅ Настройки валидированы успешно")
         return True
 
 

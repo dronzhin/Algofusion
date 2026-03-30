@@ -1,43 +1,28 @@
 # workers/Preprocess/src/processors/converter.py
 """
-Конвертер: PDF → PNG.
+Конвертер: PDF → PNG (все страницы, в память).
 Только для контейнера processor.
 """
 
 from pathlib import Path
+from typing import List
 from pdf2image import convert_from_path
+from PIL import Image
 
 from shared.utils.logger import setup_logger
 
-logger = setup_logger("processor.converters.pdf_to_png")
+logger = setup_logger("workers.Preprocess.processors.converter")
 
 
-def convert_pdf_to_png(
-        pdf_path: Path,
-        output_dir: Path,
-        dpi: int = 600,
-        output_prefix: str | None = None
-) -> list[Path]:
-    """Конвертирует PDF в набор PNG изображений."""
-    logger.info(f"📄 Конвертация PDF: {pdf_path.name} @ {dpi} DPI")
+def convert_pdf_to_images(pdf_path: Path, dpi: int = 600) -> List[Image.Image]:
+    """Конвертирует ВСЕ страницы PDF в список PIL.Image."""
+    logger.info(f"📄 Конвертация всех страниц: {pdf_path.name} @ {dpi} DPI")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    prefix = output_prefix or pdf_path.stem
+    images = convert_from_path(str(pdf_path), dpi=dpi)
 
-    try:
-        images = convert_from_path(str(pdf_path), dpi=dpi)
+    if not images:
+        raise ValueError(f"PDF пустой: {pdf_path}")
 
-        output_paths = []
-        for page_num, image in enumerate(images, start=1):
-            filename = f"{prefix}_page_{page_num}.png"
-            output_path = output_dir / filename
-            image.save(output_path, format="PNG", compress_level=0)
-            output_paths.append(output_path)
-            logger.debug(f"✅ Страница {page_num}: {filename}")
-
-        logger.info(f"✅ Конвертация завершена: {len(output_paths)} страниц")
-        return output_paths
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка конвертации {pdf_path.name}: {e}")
-        raise
+    images_rgb = [img.convert("RGB") for img in images]
+    logger.info(f"✅ Конвертировано страниц: {len(images_rgb)}")
+    return images_rgb

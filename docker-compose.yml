@@ -85,27 +85,51 @@ services:
     restart: unless-stopped
 
   # ============================================================================
-  # WORKERS - Заглушки (закомментировано для будущего расширения)
   # ============================================================================
-  # worker-preprocess:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-preprocess
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=preprocess
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/preprocess_worker.py"]
-  #   restart: unless-stopped
+  processor:
+    build:
+      context: .
+      dockerfile: workers/Preprocess/Dockerfile
+    container_name: algofusion-processor
+    restart: unless-stopped
+
+    # ← Запуск от имени текущего пользователя (совместимо с file-monitor)
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      # Shared files для чтения оригиналов и записи результатов
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SHARED_FILES_PATH=/shared/files
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+      - PROCESSOR_PDF_DPI=600
+      - PROCESSOR_BG_THRESHOLD=128
+      - PROCESSOR_BIN_THRESHOLD=128
+      - PROCESSOR_MEDIAN_ITER=5
+      - PROCESSOR_MEDIAN_SIZE=3
+      - PROCESSOR_ROT_ANGLE_THRESH=0.5
+      - PROCESSOR_ROT_SCALE=1.0
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    networks:
+      - app-network
+
+    # Ограничение ресурсов (важно для обработки изображений)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # worker-ocr:
   #   build:

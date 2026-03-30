@@ -150,14 +150,6 @@ class RedisClient:
             logger.error(f"Ошибка удаления статуса файла {file_id}: {e}")
             return False
 
-    def close(self):
-        """Закрытие соединений."""
-        if self._pubsub:
-            self._pubsub.close()
-        if self._client:
-            self._client.close()
-        logger.info("Соединения Redis закрыты")
-
     @staticmethod
     def _ensure_str(value: Any) -> str:
         """
@@ -176,6 +168,44 @@ class RedisClient:
                 f"Проверьте, не используете ли вы async-метод без 'await': {value}"
             )
         return str(value)
+
+    def publish_structured_event(
+            self,
+            channel: str,
+            event_type: str,
+            file_id: Optional[str] = None,
+            version: str = "1.0",
+            **event_data
+    ) -> int:
+        """
+        Публикация структурированного события с автоматическими метаданными.
+
+        Args:
+            channel: Redis канал (например, "files:events")
+            event_type: Тип события ("file_uploaded", "processing_error", etc.)
+            file_id: Опциональный ID файла для автоматической привязки
+            version: Версия схемы события
+            **event_data: Данные события
+
+        Returns:
+            int: Количество подписчиков, получивших сообщение
+        """
+        event = {
+            "type": event_type,
+            "version": version,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **({"file_id": file_id} if file_id else {}),
+            **event_data
+        }
+        return self.publish_event(channel, event)
+
+    def close(self):
+        """Закрытие соединений."""
+        if self._pubsub:
+            self._pubsub.close()
+        if self._client:
+            self._client.close()
+        logger.info("Соединения Redis закрыты")
 
 
 # Глобальный экземпляр (синглтон)

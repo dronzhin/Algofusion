@@ -5,21 +5,21 @@
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
+from typing import List
+from PIL import Image
 
 
 class ImageProcessorStep(ABC):
-    """Базовый класс для шага обработки изображения."""
+    """Базовый класс для шага обработки изображения в памяти."""
 
     def __init__(self, name: str):
         self.name = name
 
     @abstractmethod
-    def process(self, input_path: Path, output_path: Path) -> Path:
-        """Обрабатывает изображение."""
+    def process(self, img: Image.Image) -> Image.Image:
+        """Обрабатывает одно изображение в памяти."""
         pass
 
-    @abstractmethod
-    def validate_input(self, input_path: Path) -> bool:
-        """Проверяет, может ли процессор обработать файл."""
-        pass
+    def process_batch(self, images: List[Image.Image]) -> List[Image.Image]:
+        """Обрабатывает список изображений (реализация по умолчанию)."""
+        return [self.process(img) for img in images]

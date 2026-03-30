@@ -1,124 +1,83 @@
 # workers/Preprocess/src/services/image_processor.py
 """
 Сервис обработки изображений.
-Оркестрирует пайплайн: конвертация → бинаризация → поворот.
+Пайплайн: загрузка → бинаризация → поворот → сохранение.
+Обрабатывает ВСЕ страницы PDF.
+Все шаги выполняются в памяти.
 Только для контейнера processor.
 """
 
 from pathlib import Path
-from typing import Optional
-import shutil
+from typing import List
+
+from PIL import Image
 
 from shared.utils.logger import setup_logger
-from shared.models.file import FileJob, FileStatus
+from shared.models.file import FileJob
 from workers.Preprocess.src.config import ImageProcessingConfig
-from workers.Preprocess.src.processors.converter import convert_pdf_to_png
+from workers.Preprocess.src.processors.converter import convert_pdf_to_images
 from workers.Preprocess.src.processors.binarizer import Binarizer
 from workers.Preprocess.src.processors.rotator import Rotator
 
-logger = setup_logger("processor.services.image_processor")
+logger = setup_logger("workers.Preprocess.services.image_processor")
 
 
 class ImageProcessingError(Exception):
-    """Исключение при ошибке обработки."""
+    """Исключение при ошибке обработки изображения."""
     pass
 
 
 class ImageProcessor:
-    """
-    Сервис обработки: конвертация → бинаризация → поворот.
+    """Обработка изображений в памяти."""
 
-    Вход: любой поддерживаемый формат
-    Выход: PNG (бинаризованное, выровненное)
-    """
-
-    def __init__(self, config: Optional[ImageProcessingConfig] = None):
-        self.config = config or ImageProcessingConfig()
+    def __init__(self, config: ImageProcessingConfig):
+        self.config = config
 
         self.binarizer = Binarizer(
-            background_threshold=self.config.background_threshold,
-            binary_threshold=self.config.binary_threshold,
-            median_iterations=self.config.median_filter_iterations,
-            median_size=self.config.median_filter_size,
+            background_threshold=config.background_threshold,
+            binary_threshold=config.binary_threshold,
+            median_iterations=config.median_filter_iterations,
+            median_size=config.median_filter_size,
         )
 
         self.rotator = Rotator(
-            angle_threshold=self.config.rotation_angle_threshold,
-            scale=self.config.rotation_scale,
-            use_otsu=self.config.use_otsu_for_rotation,
+            angle_threshold=config.rotation_angle_threshold,
+            scale=config.rotation_scale,
         )
 
-    def _is_supported_format(self, file_path: Path) -> bool:
-        return file_path.suffix.lower() in self.config.supported_input_formats
-
-    def _ensure_work_dirs(self) -> dict[str, Path]:
-        dirs = self.config.get_stage_dirs()
-        for path in dirs.values():
-            path.mkdir(parents=True, exist_ok=True)
-        return dirs
-
-    def _cleanup_work_dirs(self, dirs: dict[str, Path]):
-        for path in dirs.values():
-            if path.exists():
-                shutil.rmtree(path)
-
-    def process_file_job(
-            self,
-            job: FileJob,
-            file_service,  # FileService из core.services
-            cleanup_temp: bool = True,
-    ) -> Optional[Path]:
-        """
-        Полный пайплайн обработки файла.
-
-        Сохраняет результат в preprocessed/ через file_service.
-        """
+    def process(self, job: FileJob, file_service) -> List[Path]:
+        """Полный пайплайн обработки файла (ВСЕ страницы для PDF)."""
         original_path = file_service.get_download_path(job.file_id, "original")
         if not original_path or not original_path.exists():
-            logger.error(f"Оригинал не найден: {job.file_id}")
-            return None
+            raise ImageProcessingError(f"Оригинал не найден: {job.file_id}")
 
-        if not self._is_supported_format(original_path):
-            logger.error(f"Неподдерживаемый формат: {original_path.suffix}")
-            return None
+        logger.info(f"🎯 Обработка файла: {job.file_id} ({job.original_filename})")
 
-        work_dirs = self._ensure_work_dirs()
+        # Загрузка изображений в память
+        if original_path.suffix.lower() == ".pdf":
+            images = convert_pdf_to_images(original_path, dpi=self.config.pdf_dpi)
+        else:
+            img = Image.open(original_path).convert("RGB")
+            images = [img]
 
-        try:
-            # Шаг 1: Конвертация (если PDF)
-            if original_path.suffix.lower() == ".pdf":
-                logger.info(f"📄 PDF→PNG: {original_path.name}")
-                png_paths = convert_pdf_to_png(
-                    original_path,
-                    work_dirs["converted"],
-                    dpi=self.config.pdf_dpi,
-                    output_prefix=job.file_id
-                )
-                input_path = png_paths[0]  # Обрабатываем первую страницу
-            else:
-                input_path = original_path
+        logger.info(f"📄 Страниц для обработки: {len(images)}")
 
-            # Шаг 2: Бинаризация
-            binarized_path = work_dirs["binarized"] / f"{job.file_id}.png"
-            self.binarizer.process(input_path, binarized_path)
+        # Бинаризация всех страниц
+        images = self.binarizer.process_batch(images)
 
-            # Шаг 3: Поворот
-            rotated_path = work_dirs["rotated"] / f"{job.file_id}.png"
-            self.rotator.process(binarized_path, rotated_path)
+        # Поворот всех страниц
+        images = self.rotator.process_batch(images)
 
-            # Шаг 4: Сохранение в preprocessed/
-            preprocessed_dir = Path(file_service.base_dir) / job.file_id / "preprocessed"
-            preprocessed_dir.mkdir(parents=True, exist_ok=True)
-            final_path = preprocessed_dir / f"{job.file_id}_processed.png"
-            shutil.copy2(rotated_path, final_path)
+        # Сохранение всех страниц
+        output_dir = Path(file_service.base_dir) / job.file_id / "preprocessed"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"✅ Обработка завершена: {final_path.name}")
-            return final_path
+        output_paths = []
+        for page_num, img in enumerate(images, start=1):
+            output_path = output_dir / f"{job.file_id}_page_{page_num}.png"
+            img.save(output_path, format="PNG", compress_level=6)
+            output_paths.append(output_path)
+            logger.debug(f"✅ Сохранена страница {page_num}: {output_path.name}")
 
-        except Exception as e:
-            logger.error(f"❌ Ошибка обработки {job.file_id}: {e}", exc_info=True)
-            raise ImageProcessingError(f"Обработка не удалась: {e}")
-
-        finally:
-            if cleanup_temp:
-                self._cleanup_work_dirs(work_dirs)
+        logger.info(f"✅ Обработка завершена: {len(output_paths)} страниц")
+        return output_paths

@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -32,6 +32,8 @@ class FileStatus(str, Enum):
     COMPLETED = "completed"
     EXPORTED = "exported"
     FAILED = "failed"
+
+_VALID_STATUSES = [s.value for s in FileStatus]
 
 
 class ExportStatus(str, Enum):
@@ -88,6 +90,81 @@ class FileJob:
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     history: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+
+    EVENT_CHANNEL = "files:events"  # Единый канал для всех событий о файлах
+    EVENT_VERSION = "1.0"           # Версия схемы событий (для будущей совместимости)
+
+    @classmethod
+    def validate_payload(cls, payload: str) -> Tuple[bool, List[str]]:
+        """
+        Валидация JSON payload перед парсингом.
+
+        Проверяет:
+        - Payload не пустой
+        - Валидный JSON
+        - Обязательные поля присутствуют
+        - Типы полей корректны
+
+        Returns:
+            Tuple[bool, List[str]]: (успех, список ошибок)
+        """
+        errors = []
+
+        # Проверка на пустой payload
+        if not payload or not payload.strip():
+            errors.append("Payload пустой")
+            return False, errors
+
+        # Проверка на валидный JSON
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as e:
+            errors.append(f"Неверный JSON: {e}")
+            return False, errors
+
+        # Проверка обязательных полей
+        required_fields = ["file_id", "original_filename", "status"]
+        for field_name in required_fields:
+            if field_name not in data:
+                errors.append(f"Отсутствует обязательное поле: {field_name}")
+
+        # Проверка типов полей (если поля присутствуют)
+        if "file_id" in data and not isinstance(data["file_id"], str):
+            errors.append("file_id должен быть строкой")
+
+        if "original_filename" in data and not isinstance(data["original_filename"], str):
+            errors.append("original_filename должен быть строкой")
+
+        if "file_size" in data and not isinstance(data["file_size"], (int, float)):
+            errors.append("file_size должен быть числом")
+
+        if "status" in data and data["status"] not in _VALID_STATUSES:
+            errors.append(f"status должен быть одним из: {_VALID_STATUSES}")
+
+        return len(errors) == 0, errors
+
+    @classmethod
+    def from_payload_safe(cls, payload: str) -> Tuple[Optional["FileJob"], Optional[str]]:
+        """
+        Безопасный парсинг payload с обработкой ошибок.
+
+        В отличие от from_payload(), не выбрасывает исключения,
+        а возвращает кортеж (объект или None, ошибка или None).
+
+        Returns:
+            Tuple[Optional[FileJob], Optional[str]]: (объект или None, ошибка или None)
+        """
+        # Валидация
+        is_valid, errors = cls.validate_payload(payload)
+        if not is_valid:
+            return None, "; ".join(errors)
+
+        # Парсинг (используем существующий метод — без дублирования!)
+        try:
+            job = cls.from_payload(payload)
+            return job, None
+        except Exception as e:
+            return None, f"Ошибка парсинга: {e}"
 
     @classmethod
     def from_payload(cls, payload: str) -> "FileJob":
@@ -311,3 +388,175 @@ class FileJob:
             # Naive datetime считаем за UTC для консистентности
             return dt.replace(tzinfo=timezone.utc)
         return dt
+
+    @classmethod
+    def build_uploaded_event(
+            cls,
+            file_id: str,
+            filename: str,
+            file_type: str,
+            file_size: int,
+            **extra
+    ) -> Dict[str, Any]:
+        """
+        Строит событие 'файл загружен'.
+
+        Args:
+            file_id: ID файла
+            filename: Исходное имя файла
+            file_type: Тип файла (из FileType)
+            file_size: Размер в байтах
+            **extra: Дополнительные поля для расширения
+
+        Returns:
+            Dict: Готовое к публикации событие
+        """
+        return {
+            "type": "file_uploaded",
+            "version": cls.EVENT_VERSION,
+            "file_id": file_id,
+            "filename": filename,
+            "file_type": file_type,
+            "file_size": file_size,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **extra
+        }
+
+    @classmethod
+    def build_status_changed_event(
+            cls,
+            file_id: str,
+            status: str,
+            current_module: Optional[str] = None,
+            completed_modules: Optional[List[str]] = None,
+            error: Optional[str] = None,
+            **extra
+    ) -> Dict[str, Any]:
+        """
+        Строит событие 'статус файла изменился'.
+
+        Args:
+            file_id: ID файла
+            status: Новый статус (из FileStatus.value)
+            current_module: Текущий модуль обработки (опционально)
+            completed_modules: Список завершённых модулей (опционально)
+            error: Сообщение об ошибке (опционально)
+            **extra: Дополнительные поля
+
+        Returns:
+            Dict: Готовое к публикации событие
+        """
+        event = {
+            "type": "file_status_changed",
+            "version": cls.EVENT_VERSION,
+            "file_id": file_id,
+            "status": status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Добавляем опциональные поля только если они есть
+        if current_module is not None:
+            event["current_module"] = current_module
+        if completed_modules is not None:
+            event["completed_modules"] = completed_modules
+        if error is not None:
+            event["error"] = error
+
+        event.update(extra)
+        return event
+
+    @classmethod
+    def build_processing_error_event(
+            cls,
+            file_id: str,
+            error: str,
+            module: Optional[str] = None,
+            exception_type: Optional[str] = None,
+            **extra
+    ) -> Dict[str, Any]:
+        """
+        Строит событие 'ошибка обработки'.
+
+        Args:
+            file_id: ID файла (или "unknown" если файл не распарсен)
+            error: Сообщение об ошибке
+            module: Имя модуля, где произошла ошибка (опционально)
+            exception_type: Тип исключения (опционально)
+            **extra: Дополнительные поля
+
+        Returns:
+            Dict: Готовое к публикации событие
+        """
+        event = {
+            "type": "processing_error",
+            "version": cls.EVENT_VERSION,
+            "file_id": file_id,
+            "error": error,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if module is not None:
+            event["module"] = module
+        if exception_type is not None:
+            event["exception_type"] = exception_type
+
+        event.update(extra)
+        return event
+
+    @classmethod
+    def build_exported_event(
+            cls,
+            file_id: str,
+            export_status: str,
+            document_1c_id: Optional[str] = None,
+            error: Optional[str] = None,
+            **extra
+    ) -> Dict[str, Any]:
+        """
+        Строит событие 'экспорт в 1С завершён'.
+
+        Args:
+            file_id: ID файла
+            export_status: Статус экспорта (из ExportStatus.value)
+            document_1c_id: ID документа в 1С (опционально)
+            error: Сообщение об ошибке (опционально)
+            **extra: Дополнительные поля
+
+        Returns:
+            Dict: Готовое к публикации событие
+        """
+        event = {
+            "type": "file_exported",
+            "version": cls.EVENT_VERSION,
+            "file_id": file_id,
+            "export_status": export_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if document_1c_id is not None:
+            event["document_1c_id"] = document_1c_id
+        if error is not None:
+            event["error"] = error
+
+        event.update(extra)
+        return event
+
+    @classmethod
+    def publish_event(cls, redis_client, event: Dict[str, Any]) -> int:
+        """
+        Публикует событие через RedisClient, извлекая метаданные.
+
+        Args:
+            redis_client: Экземпляр RedisClient
+            event: Событие, созданное одним из build_*_event методов
+
+        Returns:
+            int: Количество подписчиков
+        """
+        return redis_client.publish_structured_event(
+            channel=cls.EVENT_CHANNEL,
+            event_type=event["type"],
+            file_id=event.get("file_id"),
+            version=event.get("version", cls.EVENT_VERSION),
+            **{k: v for k, v in event.items() if k not in ["type", "version", "timestamp", "file_id"]}
+        )
