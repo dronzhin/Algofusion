@@ -90,6 +90,7 @@ services:
     build:
       context: .
       dockerfile: workers/Preprocess/Dockerfile
+#      dockerfile: workers/preprocessing_stage_1/Dockerfile
     container_name: algofusion-processor
     restart: unless-stopped
 

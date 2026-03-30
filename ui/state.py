@@ -37,30 +37,44 @@ class SessionState:
     _logs: List[Dict[str, str]] = field(default_factory=list)
     max_logs: int = 100
 
-    # 📡 Pub/Sub
+    # 📡 Pub/Sub — инициализируем явно в __post_init__
     _pubsub: Any = None
     _subscribed_channels: List[str] = field(default_factory=lambda: ["files:events", "1c:export"])
     _last_event_check: float = 0.0
-    _event_check_interval: float = 1.0  # Проверять события не чаще 1 раза в секунду
+    _event_check_interval: float = 1.0
 
     # 🔔 Флаги
     pending_events: bool = False
+
+    def __post_init__(self):
+        """
+        Гарантированная инициализация полей после создания объекта.
+        Streamlit может не вызывать __post_init__, поэтому дублируем в методах.
+        """
+        # Инициализируем _pubsub если не задан
+        if not hasattr(self, '_pubsub') or self._pubsub is None:
+            object.__setattr__(self, '_pubsub', None)
+
+        # Инициализируем _logs если не задан
+        if not hasattr(self, '_logs'):
+            object.__setattr__(self, '_logs', [])
+
+        # Инициализируем _filters если не задан
+        if not hasattr(self, '_filters'):
+            object.__setattr__(self, '_filters', {})
 
     # ========================================================================
     # МЕТОДЫ: ЛОГИ
     # ========================================================================
 
     def add_log(self, status: str, message: str, time_str: Optional[str] = None) -> None:
-        """
-        Добавляет запись в журнал событий.
-
-        Args:
-            status: Статус ("OK", "ERROR", "INFO", "WARNING")
-            message: Текст сообщения
-            time_str: Время в формате "HH:MM:SS" (по умолчанию: сейчас)
-        """
+        """Добавляет запись в журнал событий."""
         if time_str is None:
             time_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+        # Гарантируем что _logs существует
+        if not hasattr(self, '_logs'):
+            object.__setattr__(self, '_logs', [])
 
         self._logs.append({
             "time": time_str,
@@ -68,7 +82,6 @@ class SessionState:
             "msg": message
         })
 
-        # Ограничиваем размер журнала
         if len(self._logs) > self.max_logs:
             self._logs = self._logs[-self.max_logs:]
 
@@ -76,11 +89,14 @@ class SessionState:
 
     def get_logs(self, limit: int = 20) -> List[Dict[str, str]]:
         """Получение последних логов для отображения."""
+        if not hasattr(self, '_logs'):
+            return []
         return self._logs[-limit:] if self._logs else []
 
     def clear_logs(self) -> None:
         """Очистка журнала событий."""
-        self._logs.clear()
+        if hasattr(self, '_logs'):
+            self._logs.clear()
         self.pending_events = False
 
     # ========================================================================
@@ -88,37 +104,45 @@ class SessionState:
     # ========================================================================
 
     def subscribe_to_events(self) -> None:
-        """
-        Подписывается на каналы событий Redis.
-        Вызывать один раз при инициализации.
-        """
-        if not self.redis_client or self._pubsub is not None:
+        """Подписывается на каналы событий Redis."""
+        if not self.redis_client:
             return
 
+        # Безопасное получение _pubsub
+        current_pubsub = getattr(self, '_pubsub', None)
+        if current_pubsub is not None:
+            return  # Уже подписаны
+
         try:
-            self._pubsub = self.redis_client.subscribe(self._subscribed_channels)
+            pubsub = self.redis_client.subscribe(self._subscribed_channels)
+            # Используем object.__setattr__ для надёжности
+            object.__setattr__(self, '_pubsub', pubsub)
             logger.info(f"✅ Подписка на события: {self._subscribed_channels}")
         except Exception as e:
             logger.error(f"❌ Ошибка подписки на события: {e}")
 
     def process_events(self) -> None:
-        """
-        Обрабатывает новые события из Redis и добавляет их в журнал.
-        Вызывать на каждом рендере страницы (в render_main_page).
-        """
-        # Проверяем не чаще чем _event_check_interval секунд
+        """Обрабатывает новые события из Redis и добавляет их в журнал."""
+        # Проверка частоты
         now = time.time()
-        if now - self._last_event_check < self._event_check_interval:
+        last_check = getattr(self, '_last_event_check', 0.0)
+        interval = getattr(self, '_event_check_interval', 1.0)
+
+        if now - last_check < interval:
+            return
+        object.__setattr__(self, '_last_event_check', now)
+
+        if not self.redis_client:
             return
 
-        self._last_event_check = now
-
-        if not self.redis_client or self._pubsub is None:
-            return
+        # Безопасное получение _pubsub
+        pubsub = getattr(self, '_pubsub', None)
+        if pubsub is None:
+            return  # Ещё не подписаны
 
         try:
             # Неблокирующее получение сообщений
-            message = self._pubsub.get_message(timeout=0)
+            message = pubsub.get_message(timeout=0)
 
             while message:
                 if message.get("type") in ("message", "pmessage"):
@@ -128,26 +152,19 @@ class SessionState:
                     except (json.JSONDecodeError, KeyError) as e:
                         logger.debug(f"⚠️ Не удалось распарсить событие: {e}")
 
-                message = self._pubsub.get_message(timeout=0)
+                message = pubsub.get_message(timeout=0)
 
         except Exception as e:
             logger.debug(f"⚠️ Ошибка обработки событий: {e}")
 
     def _handle_event(self, event: Dict[str, Any]) -> None:
-        """
-        Преобразует событие Redis в запись журнала.
-
-        Поддерживаемые типы:
-        - file_uploaded
-        - file_status_changed
-        - processing_error
-        """
+        """Преобразует событие Redis в запись журнала."""
         event_type = event.get("type")
         file_id = event.get("file_id", "unknown")
         file_id_short = file_id[:8] if len(file_id) >= 8 else file_id
         timestamp = event.get("timestamp", "")
 
-        # Форматируем время из ISO в "HH:MM:SS"
+        # Форматируем время
         time_str = "—:—:—"
         if timestamp:
             try:
@@ -170,11 +187,9 @@ class SessionState:
 
             if status == "processing" and module == "preprocess":
                 self.add_log("INFO", f"🔄 Предобработка: {file_id_short}...")
-
             elif status == "completed" and module is None:
                 modules_str = ", ".join(completed) if completed else "все"
                 self.add_log("OK", f"✅ Обработка завершена: {file_id_short}... [{modules_str}]")
-
             elif status == "failed":
                 msg = f"❌ Ошибка: {error}" if error else "❌ Ошибка обработки"
                 self.add_log("ERROR", f"{msg} ({file_id_short}...)")
@@ -235,7 +250,10 @@ def get_session_state() -> SessionState:
     """Получение или создание сессии (синглтон)."""
     if _SESSION_STATE_KEY not in st.session_state:
         logger.info("🔄 Инициализация нового SessionState")
-        st.session_state[_SESSION_STATE_KEY] = SessionState()
+        # Создаём объект и явно вызываем __post_init__
+        session = SessionState()
+        session.__post_init__()
+        st.session_state[_SESSION_STATE_KEY] = session
     return st.session_state[_SESSION_STATE_KEY]
 
 
