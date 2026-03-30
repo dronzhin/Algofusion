@@ -17,7 +17,7 @@ from shared.utils.logger import setup_logger
 from shared.config.settings import get_settings
 
 # UI state & cache
-from ui.state import SessionState
+from ui.state import SessionState, get_session_state
 from ui.cache import get_files_from_redis_cached, get_file_stats_cached
 
 # Components (только публичные функции!)
@@ -36,6 +36,9 @@ def render_main_page(session: SessionState) -> None:
     Компонует: сайдбар, статистику, логи и список файлов.
     """
     logger.info("📄 Рендеринг главной страницы")
+
+    # 🔹 ОБРАБОТКА СОБЫТИЙ ОТ ПРОЦЕССОРА (добавляет логи в session)
+    session.process_events()
 
     # 🔹 Применяем компактные стили для списка файлов
     from ui.utils.ui_hacks import add_compact_file_list_styles
@@ -58,6 +61,11 @@ def render_main_page(session: SessionState) -> None:
     if not file_service:
         st.error("❌ FileService не инициализирован")
         return
+
+    # 🔹 Подписка на события (один раз при первом запуске)
+    if not getattr(session, "_events_subscribed", False):
+        session.subscribe_to_events()
+        session._events_subscribed = True
 
     # ========================================================================
     # АВТООБНОВЛЕНИЕ СТРАНИЦЫ
