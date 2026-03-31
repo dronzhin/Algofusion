@@ -1,132 +1,69 @@
-# workers/ocr/src/ocr/tesseract.py
-"""Tesseract OCR движок."""
+# workers/ocr/ocr/tesseract.py
+"""
+Tesseract OCR движок (обработка в памяти).
+"""
 
-from pathlib import Path
-from typing import Any, Dict, Optional
-import time
-
-import numpy as np
-from PIL import Image
+from typing import List, Union
+from PIL import Image, ImageEnhance
 import pytesseract
 
-from src.ocr.base import BaseOCREngine, OCRResult
-from src.ocr.registry import OCREngineRegistry
-from src.logger import get_logger
+from shared.utils.logger import setup_logger
+from workers.OCR.src.ocr.base import OCREngine
 
-logger = get_logger(__name__)
+logger = setup_logger("workers.ocr.ocr.tesseract")
 
 
-@OCREngineRegistry.register
-class TesseractEngine(BaseOCREngine):
-    """OCR движок на основе Tesseract."""
+class TesseractEngine(OCREngine):
+    """Tesseract OCR с обработкой в памяти."""
 
     name = "tesseract"
-    description = "Tesseract OCR Engine (быстрый, точный для печатного текста)"
-    version = "1.0.0"
 
-    supported_languages = {"rus", "eng", "deu", "fra", "spa", "ita"}
-    supported_formats = {".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".pdf"}
+    def __init__(self, config: dict):
+        super().__init__(config)
+        lang_config = config.get("lang", "rus+eng")
+        self.lang = lang_config if isinstance(lang_config, str) else "+".join(lang_config)
 
-    def get_default_config(self) -> Dict[str, Any]:
-        return {
-            "lang": "rus+eng",
-            "oem": 1,
-            "psm": 1,
-            "preprocess": False,
-            "dpi": 300
-        }
+        self.oem = config.get("oem", 1)
+        self.psm = config.get("psm", 11)
+        self.preprocess = config.get("preprocess", False)
 
-    def process(self, input_path: Path, output_path: Path = None) -> OCRResult:
-        start_time = time.time()
+    def process(self, img: Image.Image) -> str:
+        """Распознавание одного изображения в памяти."""
+        logger.debug(f"🔤 Tesseract: {img.size}px, режим {img.mode}")
 
-        try:
-            self.validate_input(input_path)
+        # Конвертируем в RGB если нужно
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
-            if not self.validate_language(self.config["lang"]):
-                raise ValueError(f"Язык {self.config['lang']} не поддерживается")
+        # Предобработка если включена
+        if self.preprocess:
+            img = self._preprocess(img)
 
-            logger.debug(f"Tesseract обработка: {input_path}")
+        # Конфигурация Tesseract
+        config_str = f"--oem {self.oem} --psm {self.psm}"
 
-            if input_path.suffix.lower() == ".pdf":
-                text = self._process_pdf(input_path)
-            else:
-                text = self._process_image(input_path)
-
-            if output_path:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(text, encoding="utf-8")
-
-            duration = time.time() - start_time
-
-            return OCRResult(
-                success=True,
-                text=text,
-                confidence=0.9,
-                duration=duration,
-                engine=self.name,
-                metadata={
-                    "char_count": len(text),
-                    "word_count": len(text.split()),
-                    "lines": len(text.splitlines())
-                }
-            )
-
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(f"Tesseract ошибка: {e}")
-            return OCRResult(
-                success=False,
-                text="",
-                duration=duration,
-                engine=self.name,
-                error=str(e)
-            )
-
-    def _process_image(self, input_path: Path) -> str:
-        """Обработка изображения."""
-        img = np.array(Image.open(input_path).convert("RGB"))
-
-        if self.config.get("preprocess", False):
-            img = self._preprocess_image(img)
-
-        config_str = f"--oem {self.config['oem']} --psm {self.config['psm']}"
+        # 🔹 Распознавание (lang теперь строка!)
         text = pytesseract.image_to_string(
             img,
-            lang=self.config["lang"],
+            lang=self.lang,
             config=config_str
         ).strip()
 
+        logger.debug(f"✅ Tesseract: {len(text)} символов")
         return text
 
-    def _process_pdf(self, input_path: Path) -> str:
-        """Обработка PDF."""
-        try:
-            from pdf2image import convert_from_path
+    def process_batch(self, images: List[Image.Image]) -> List[str]:
+        """Пакетная обработка с логированием."""
+        logger.info(f"🔤 Tesseract: обработка {len(images)} изображений")
+        return super().process_batch(images)
 
-            images = convert_from_path(input_path, dpi=self.config.get("dpi", 300))
-
-            texts = []
-            for img in images:
-                img_array = np.array(img.convert("RGB"))
-                config_str = f"--oem {self.config['oem']} --psm {self.config['psm']}"
-                text = pytesseract.image_to_string(
-                    img_array,
-                    lang=self.config["lang"],
-                    config=config_str
-                )
-                texts.append(text)
-
-            return "\n\n".join(texts)
-
-        except ImportError:
-            raise ImportError("pdf2image не установлен. pip install pdf2image")
-
-    def _preprocess_image(self, img: np.ndarray) -> np.ndarray:
-        """Предобработка изображения."""
-        from PIL import ImageEnhance
-
-        pil_img = Image.fromarray(img)
-        pil_img = ImageEnhance.Contrast(pil_img).enhance(1.2)
-        img_gray = pil_img.convert("L")
-        img_bw = img_gray.point(lambda x: 255 if x > 128 else 0, mode="1")
-        return np.array(img_bw.convert("RGB"))
+    def _preprocess(self, img: Image.Image) -> Image.Image:
+        """Базовая предобработка: контраст + бинаризация."""
+        # Увеличение контраста
+        img = ImageEnhance.Contrast(img).enhance(1.2)
+        # Конвертация в оттенки серого
+        img = img.convert("L")
+        # Бинаризация
+        img = img.point(lambda x: 255 if x > 128 else 0, mode="1")
+        # Обратно в RGB для pytesseract
+        return img.convert("RGB")

@@ -1,44 +1,33 @@
 # workers/ocr/src/config.py
-"""Конфигурация OCR-воркера."""
+"""
+Конфигурация OCR-воркера.
+Только необходимые параметры, без дублирования.
+"""
 
-import os
-from pathlib import Path
 from dataclasses import dataclass, field
+import os
 
 
 @dataclass
-class Config:
-    """Конфигурация из environment variables."""
+class OCRProcessingConfig:
+    """Конфигурация обработки OCR (в памяти)."""
 
-    # Redis
-    redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://redis:6379/0"))
-    redis_queue: str = field(default_factory=lambda: os.getenv("OCR_QUEUE", "files:ocr"))
-    redis_timeout: int = field(default_factory=lambda: int(os.getenv("BLPOP_TIMEOUT", "5")))
+    # === Движок по умолчанию ===
+    default_engine: str = os.getenv("OCR_DEFAULT_ENGINE", "tesseract")
+    default_lang: str = os.getenv("OCR_DEFAULT_LANG", "rus+eng")
 
-    # Пути
-    shared_files_dir: Path = field(default_factory=lambda: Path(os.getenv("SHARED_FILES_DIR", "/shared/files")))
+    # === Tesseract параметры ===
+    tesseract_oem: int = int(os.getenv("OCR_TESSERACT_OEM", "1"))
+    tesseract_psm: int = int(os.getenv("OCR_TESSERACT_PSM", "11"))
+    tesseract_preprocess: bool = os.getenv("OCR_TESSERACT_PREPROCESS", "0") == "1"
+    tesseract_dpi: int = int(os.getenv("OCR_TESSERACT_DPI", "300"))
 
-    # OCR по умолчанию
-    default_ocr_engine: str = field(default_factory=lambda: os.getenv("DEFAULT_OCR_ENGINE", "tesseract"))
-    default_ocr_lang: str = field(default_factory=lambda: os.getenv("DEFAULT_OCR_LANG", "rus+eng"))
-    default_oem: int = field(default_factory=lambda: int(os.getenv("DEFAULT_OCR_OEM", "1")))
-    default_psm: int = field(default_factory=lambda: int(os.getenv("DEFAULT_OCR_PSM", "1")))
+    # === EasyOCR параметры ===
+    easyocr_gpu: bool = os.getenv("OCR_EASYOCR_GPU", "0") == "1"
+    easyocr_min_score: float = float(os.getenv("OCR_EASYOCR_MIN_SCORE", "0.5"))
 
-    # Worker
-    container_id: str = field(default_factory=lambda: os.getenv("CONTAINER_ID", "ocr-worker"))
-    service_name: str = field(default_factory=lambda: os.getenv("SERVICE_NAME", "ocr-worker"))
-    max_retries: int = field(default_factory=lambda: int(os.getenv("MAX_RETRIES", "3")))
-
-    # Логирование
-    log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
-    log_format: str = field(default_factory=lambda: os.getenv("LOG_FORMAT", "text"))
-
-    @classmethod
-    def validate(cls) -> bool:
-        """Проверка обязательных переменных."""
-        if not os.getenv("REDIS_URL"):
-            raise ValueError("Требуется переменная REDIS_URL")
-        return True
-
-
-config = Config()
+    # === Общие ===
+    supported_input_formats: tuple[str, ...] = field(default_factory=lambda: (
+        ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif"
+    ))
+    output_extension: str = ".txt"

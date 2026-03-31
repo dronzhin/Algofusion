@@ -1,94 +1,67 @@
 # workers/ocr/src/ocr/easyocr.py
-"""EasyOCR движок."""
+"""
+EasyOCR движок (обработка в памяти).
+"""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
-import time
+from typing import List
+import numpy as np
+from PIL import Image
 
-from src.ocr.base import BaseOCREngine, OCRResult
-from src.ocr.registry import OCREngineRegistry
-from src.logger import get_logger
+from shared.utils.logger import setup_logger
+from workers.OCR.src.ocr.base import OCREngine
 
-logger = get_logger(__name__)
+logger = setup_logger("workers.ocr.ocr.easyocr")
 
 
-@OCREngineRegistry.register
-class EasyOCREngine(BaseOCREngine):
-    """OCR движок на основе EasyOCR."""
+class EasyOCREngine(OCREngine):
+    """EasyOCR с обработкой в памяти."""
 
     name = "easyocr"
-    description = "EasyOCR Engine (точный для рукописного текста, медленнее)"
-    version = "1.0.0"
 
-    supported_languages = {"ru", "en", "de", "fr", "es", "it", "zh", "ja", "ko"}
-    supported_formats = {".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif"}
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.lang_list = config.get("lang", ["ru", "en"])
+        self.gpu = config.get("gpu", False)
+        self.min_score = config.get("min_score", 0.5)
+        self._reader = None  # Ленивая инициализация
 
-    def get_default_config(self) -> Dict[str, Any]:
-        return {
-            "lang": ["ru", "en"],
-            "gpu": False,
-            "detail": 1,
-            "min_score": 0.5,
-            "paragraph": False
-        }
-
-    def process(self, input_path: Path, output_path: Path = None) -> OCRResult:
-        start_time = time.time()
-
-        try:
-            self.validate_input(input_path)
-
-            logger.debug(f"EasyOCR обработка: {input_path}")
-
+    def _get_reader(self):
+        """Ленивая инициализация EasyOCR Reader."""
+        if self._reader is None:
             import easyocr
-            reader = easyocr.Reader(
-                self.config["lang"],
-                gpu=self.config.get("gpu", False),
+            self._reader = easyocr.Reader(
+                self.lang_list,
+                gpu=self.gpu,
                 verbose=False
             )
+            logger.info(f"✅ EasyOCR инициализирован: языки={self.lang_list}")
+        return self._reader
 
-            results = reader.readtext(
-                str(input_path),
-                detail=self.config.get("detail", 1),
-                min_score=self.config.get("min_score", 0.5),
-                paragraph=self.config.get("paragraph", False)
-            )
+    def process(self, img: Image.Image) -> str:
+        """Распознавание одного изображения в памяти."""
+        logger.debug(f"🔤 EasyOCR: {img.size}px")
 
-            if self.config.get("detail", 1) == 1:
-                text = "\n".join([r[1] for r in results])
-                confidences = [r[2] for r in results]
-                avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-            else:
-                text = "\n".join([r for r in results])
-                avg_confidence = 0.0
+        # Конвертируем PIL → numpy array (BGR для EasyOCR)
+        img_array = np.array(img.convert("RGB"))
 
-            if output_path:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(text, encoding="utf-8")
+        # Распознавание
+        reader = self._get_reader()
+        results = reader.readtext(
+            img_array,
+            detail=1,
+            min_score=self.min_score,
+            paragraph=False
+        )
 
-            duration = time.time() - start_time
+        # Извлекаем текст
+        text_lines = [r[1] for r in results]
+        text = "\n".join(text_lines)
 
-            return OCRResult(
-                success=True,
-                text=text,
-                confidence=avg_confidence,
-                duration=duration,
-                engine=self.name,
-                metadata={
-                    "char_count": len(text),
-                    "word_count": len(text.split()),
-                    "detections": len(results),
-                    "avg_confidence": avg_confidence
-                }
-            )
+        logger.debug(f"✅ EasyOCR: {len(text)} символов, {len(results)} детекций")
+        return text
 
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(f"EasyOCR ошибка: {e}")
-            return OCRResult(
-                success=False,
-                text="",
-                duration=duration,
-                engine=self.name,
-                error=str(e)
-            )
+    def process_batch(self, images: List[Image.Image]) -> List[str]:
+        """Пакетная обработка с логированием."""
+        logger.info(f"🔤 EasyOCR: обработка {len(images)} изображений")
+        return super().process_batch(images)

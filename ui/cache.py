@@ -32,42 +32,76 @@ def get_redis_client_cached():
     return get_redis_client()
 
 
-@st.cache_data(ttl=CACHE_TTL["file_stats"])
-def get_file_stats_cached(
-    _redis_client: Any,
-    _cache_key: str = "default"
-) -> Dict[str, Any]:
-    """Статистика файлов (кэш 1 минута)."""
+@st.cache_data(ttl=30, show_spinner="Загрузка статистики...")
+def get_file_stats_cached(_redis_client, _cache_key: str) -> Dict[str, Any]:
+    """
+    Получение статистики обработки файлов из Redis.
+
+    Args:
+        _redis_client: RedisClient (с подчёркиванием — не хешируется Streamlit)
+        _cache_key: Ключ для инвалидации кэша (также с подчёркиванием)
+
+    Returns:
+        Dict с метриками по категориям
+    """
+    # 🔹 Используем _redis_client внутри функции (имя не имеет значения)
+    if not _redis_client:
+        return _empty_stats()
+
     try:
-        if isinstance(_redis_client, list):
-            files = _redis_client
-        elif hasattr(_redis_client, 'get_all_files'):
-            files = _redis_client.get_all_files()
-        else:
-            return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
+        # Получаем все файлы из Redis
+        files = _redis_client.get_all_files()
 
-        total = len(files)
-        if total == 0:
-            return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
-
-        statuses = [f.get("status", "unknown") for f in files]
-        completed = statuses.count("completed")
-        processing = statuses.count("processing")
-        failed = statuses.count("failed")
-        exported = statuses.count("exported")
-        success_rate = f"{(completed / total * 100):.1f}%" if total > 0 else "0%"
-
-        return {
-            "total": total,
-            "completed": completed,
-            "processing": processing,
-            "failed": failed,
-            "exported": exported,
-            "success_rate": success_rate
+        # 🔹 Инициализируем счётчики по категориям
+        stats = {
+            "uploaded": 0,
+            "preprocessing": 0,
+            "ocr": 0,
+            "llm": 0,
+            "pending_export": 0,
+            "exported": 0,
+            "failed": 0,
+            "total": len(files),
         }
+
+        # 🔹 Распределяем файлы по категориям
+        for file_data in files:
+            status = file_data.get("status", "unknown")
+            current_module = file_data.get("current_module", "")
+            completed_modules = set(file_data.get("completed_modules", []))
+            export_status = file_data.get("export_status", "pending")
+
+            if status == "failed":
+                stats["failed"] += 1
+            elif status == "uploaded":
+                stats["uploaded"] += 1
+            elif status == "processing":
+                if current_module == "preprocess":
+                    stats["preprocessing"] += 1
+                elif current_module == "ocr":
+                    stats["ocr"] += 1
+                elif current_module == "llm":
+                    stats["llm"] += 1
+            elif status == "completed":
+                if export_status == "success":
+                    stats["exported"] += 1
+                else:
+                    stats["pending_export"] += 1
+
+        return stats
+
     except Exception as e:
-        logger.error(f"❌ Ошибка получения статистики: {e}")
-        return {"total": 0, "completed": 0, "processing": 0, "failed": 0, "exported": 0, "success_rate": "0%"}
+        logger.error(f"Ошибка получения статистики: {e}")
+        return _empty_stats()
+
+
+def _empty_stats() -> Dict[str, Any]:
+    """Пустая статика для случая ошибки."""
+    return {
+        "uploaded": 0, "preprocessing": 0, "ocr": 0, "llm": 0,
+        "pending_export": 0, "exported": 0, "failed": 0,
+        "total": 0,
+    }
 
 
 @st.cache_data(ttl=CACHE_TTL["files_list"])

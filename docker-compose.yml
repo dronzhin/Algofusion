@@ -132,25 +132,57 @@ services:
           cpus: '0.5'
           memory: 512M
 
-  # worker-ocr:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-ocr
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=ocr
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/ocr_worker.py"]
-  #   restart: unless-stopped
+  # ============================================================================
+  # 🆕 OCR - Распознавание текста (автоматическое)
+  # ============================================================================
+  ocr:
+    build:
+      context: .
+      dockerfile: workers/OCR/Dockerfile
+    container_name: algofusion-ocr
+    restart: unless-stopped
+
+    user: "${UID:-1000}:${GID:-1000}"
+
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+
+    environment:
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Files
+      - SHARED_FILES_PATH=/shared/files
+      # Logging
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+      # OCR settings
+      - OCR_DEFAULT_ENGINE=tesseract
+      - OCR_DEFAULT_LANG=rus+eng
+      - OCR_TESSERACT_OEM=1
+      - OCR_TESSERACT_PSM=11
+      - OCR_TESSERACT_PREPROCESS=0
+      - OCR_TESSERACT_DPI=300
+      - OCR_EASYOCR_GPU=0
+      - OCR_EASYOCR_MIN_SCORE=0.5
+
+    depends_on:
+      redis:
+        condition: service_healthy
+      processor:
+        condition: service_started  # OCR зависит от результатов preprocess
+
+    networks:
+      - app-network
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # worker-llm:
   #   build:
@@ -197,6 +229,10 @@ services:
 # ============================================================================
 volumes:
   redis_data:
+    driver: local
+  processor_work:
+    driver: local
+  ocr_work:
     driver: local
 
 # ============================================================================

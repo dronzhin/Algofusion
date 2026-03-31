@@ -115,7 +115,11 @@ def render_main_page(session: SessionState) -> None:
 
     with stats_col:
         stats = get_file_stats_cached(redis_client, _cache_key=session.cache_buster)
-        render_stats_panel(stats, show_progress=True)
+        render_stats_panel(
+            stats,
+            show_progress=True,
+            vertical=True  # ← Включаем вертикальное отображение
+        )
 
     st.divider()
 

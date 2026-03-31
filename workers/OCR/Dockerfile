@@ -1,41 +1,62 @@
 # workers/ocr/Dockerfile
-FROM python:3.12-slim
+FROM python:3.11-slim
 
-WORKDIR /app
+# Метаданные
+LABEL org.opencontainers.image.title="Algofusion OCR Worker"
+LABEL org.opencontainers.image.description="Worker для OCR-обработки: Tesseract, EasyOCR"
+LABEL org.opencontainers.image.version="0.1.0"
 
-# ==================== Системные зависимости ====================
+# Переменные окружения
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    OCR_DEFAULT_ENGINE=tesseract \
+    OCR_DEFAULT_LANG=rus+eng \
+    OCR_TESSERACT_OEM=1 \
+    OCR_TESSERACT_PSM=11 \
+    OCR_TESSERACT_PREPROCESS=0 \
+    OCR_TESSERACT_DPI=300 \
+    OCR_EASYOCR_GPU=0 \
+    OCR_EASYOCR_MIN_SCORE=0.5
+
+# === Системные зависимости ===
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Tesseract OCR
+    # Tesseract OCR + языки
     tesseract-ocr \
-    tesseract-ocr-eng \
     tesseract-ocr-rus \
-    # Для работы с изображениями
+    tesseract-ocr-eng \
+    # Для pdf2image
+    poppler-utils \
+    # Для OpenCV/EasyOCR
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    # Для PDF
-    poppler-utils \
-    # Очистка
+    libxrender1 \
+    # Утилиты
+    curl \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && ldconfig
 
-# ==================== Python зависимости ====================
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Рабочая директория
+WORKDIR /app
 
-# ==================== Исходный код ====================
-COPY src/ ./src/
+# === Зависимости OCR ===
+COPY workers/OCR/requirements.txt .
+RUN pip install -r requirements.txt
 
-# ==================== Пользователь (безопасность) ====================
-RUN useradd -m -u 1000 ocruser && chown -R ocruser:ocruser /app
-USER ocruser
+# === Копируем ОБЩИЙ код ===
+COPY shared/ ./shared/
+COPY core/services/redis_client.py ./core/services/redis_client.py
+COPY core/services/file_service.py ./core/services/file_service.py
 
-# ==================== Healthcheck ====================
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import redis; redis.Redis().ping()" || exit 1
+# === Копируем КОД OCR (плоская структура) ===
+COPY workers/OCR/worker.py ./workers/OCR/worker.py
+COPY workers/OCR/src/ ./workers/OCR/src/
 
-# ==================== Точка входа ====================
-ENTRYPOINT ["python", "-m", "src.main"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "from core.services.redis_client import get_redis_client; get_redis_client().client.ping()" || exit 1
+
+# Точка входа
+CMD ["python", "workers/OCR/worker.py"]

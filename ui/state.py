@@ -157,11 +157,27 @@ class SessionState:
         except Exception as e:
             logger.debug(f"⚠️ Ошибка обработки событий: {e}")
 
+    # ui/state.py — в методе _handle_event
+
     def _handle_event(self, event: Dict[str, Any]) -> None:
         """Преобразует событие Redis в запись журнала."""
         event_type = event.get("type")
         file_id = event.get("file_id", "unknown")
         file_id_short = file_id[:8] if len(file_id) >= 8 else file_id
+
+        # 🔹 Получаем метаданные
+        filename = event.get("filename")
+        page_count = event.get("page_count")
+
+        # 🔹 Формируем отображаемое имя
+        if filename:
+            if page_count and page_count > 1:
+                filename_display = f"{filename} ({page_count} стр.)"
+            else:
+                filename_display = filename
+        else:
+            filename_display = f"{file_id_short}..."
+
         timestamp = event.get("timestamp", "")
 
         # Форматируем время
@@ -185,19 +201,42 @@ class SessionState:
             error = event.get("error")
             completed = event.get("completed_modules", [])
 
+            # 🔹 События предобработки
             if status == "processing" and module == "preprocess":
-                self.add_log("INFO", f"🔄 Предобработка: {file_id_short}...")
+                self.add_log("INFO", f"🔧 Предобработка: {filename_display}")
+
+            # 🔹 События OCR
+            elif status == "processing" and module == "ocr":
+                self.add_log("INFO", f"🔤 OCR: {filename_display}")
+
+            # 🔹 События LLM
+            elif status == "processing" and module == "llm":
+                self.add_log("INFO", f"🧠 LLM: {filename_display}")
+
+            # 🔹 Завершение модулей
             elif status == "completed" and module is None:
-                modules_str = ", ".join(completed) if completed else "все"
-                self.add_log("OK", f"✅ Обработка завершена: {file_id_short}... [{modules_str}]")
+                if "ocr" in completed and "preprocess" in completed:
+                    self.add_log("OK", f"✅ OCR завершён: {filename_display}")
+                elif "preprocess" in completed and "ocr" not in completed:
+                    self.add_log("OK", f"✅ Предобработка завершена: {filename_display}")
+                elif "llm" in completed:
+                    self.add_log("OK", f"✅ LLM завершён: {filename_display}")
+                else:
+                    modules_str = ", ".join(completed) if completed else "все"
+                    # Если есть page_count — показываем количество файлов
+                    if page_count and page_count > 1:
+                        self.add_log("OK", f"✅ Завершено: {filename_display} ({page_count} файлов) [{modules_str}]")
+                    else:
+                        self.add_log("OK", f"✅ Завершено: {filename_display} [{modules_str}]")
+
             elif status == "failed":
                 msg = f"❌ Ошибка: {error}" if error else "❌ Ошибка обработки"
-                self.add_log("ERROR", f"{msg} ({file_id_short}...)")
+                self.add_log("ERROR", f"{msg} ({filename_display})")
 
         elif event_type == "processing_error":
             error = event.get("error", "Неизвестная ошибка")
             module = event.get("module", "unknown")
-            self.add_log("ERROR", f"⚠️ {module}: {error}")
+            self.add_log("ERROR", f"⚠️ {module}: {error} ({filename_display})")
 
     # ========================================================================
     # МЕТОДЫ: КЭШИРОВАНИЕ

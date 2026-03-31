@@ -430,6 +430,8 @@ class FileJob:
             current_module: Optional[str] = None,
             completed_modules: Optional[List[str]] = None,
             error: Optional[str] = None,
+            filename: Optional[str] = None,  # ← Исходное имя файла
+            page_count: Optional[int] = None,  # ← Количество страниц/файлов
             **extra
     ) -> Dict[str, Any]:
         """
@@ -437,10 +439,12 @@ class FileJob:
 
         Args:
             file_id: ID файла
-            status: Новый статус (из FileStatus.value)
-            current_module: Текущий модуль обработки (опционально)
-            completed_modules: Список завершённых модулей (опционально)
-            error: Сообщение об ошибке (опционально)
+            status: Новый статус
+            current_module: Текущий модуль
+            completed_modules: Завершённые модули
+            error: Сообщение об ошибке
+            filename: Исходное имя файла (для отображения в логах)
+            page_count: Количество обработанных страниц (опционально)
             **extra: Дополнительные поля
 
         Returns:
@@ -454,13 +458,17 @@ class FileJob:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Добавляем опциональные поля только если они есть
+        # Опциональные поля
         if current_module is not None:
             event["current_module"] = current_module
         if completed_modules is not None:
             event["completed_modules"] = completed_modules
         if error is not None:
             event["error"] = error
+        if filename is not None:
+            event["filename"] = filename
+        if page_count is not None:
+            event["page_count"] = page_count
 
         event.update(extra)
         return event
