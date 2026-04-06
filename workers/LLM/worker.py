@@ -111,7 +111,7 @@ class LLMWorker:
                 if "export" in allowed and "export" not in job.completed_modules:
                     job.current_module = "export"
                     self.redis.set_file_status(job.file_id, job.to_dict())
-                    self.redis.push_to_queue("files:export", job.to_payload(), priority=job.priority)
+                    self.redis.push_to_queue(FileJob.get_queue_for_module("export"), job.to_payload(), priority=job.priority)
                     logger.info(f"📤 В очередь export: {job.file_id}")
                 else:
                     # Обработка завершена

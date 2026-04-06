@@ -43,7 +43,7 @@ class ImageProcessorWorker:
         processor_config = ImageProcessingConfig()
         self.processor = ImageProcessor(config=processor_config)
 
-        self.queues = ["files:preprocess"]
+        self.queues = FileJob.get_queue_for_module("preprocess")
 
         logger.info(f"ImageProcessorWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")
@@ -115,7 +115,7 @@ class ImageProcessorWorker:
                 if "ocr" in allowed and "ocr" not in job.completed_modules:
                     job.current_module = "ocr"
                     self.redis.set_file_status(job.file_id, job.to_dict())
-                    self.redis.push_to_queue("files:ocr", job.to_payload(), priority=job.priority)
+                    self.redis.push_to_queue(FileJob.get_queue_for_module("ocr"), job.to_payload(), priority=job.priority)
                     logger.info(f"📤 В очередь OCR: {job.file_id}")
                 else:
                     # Обработка завершена

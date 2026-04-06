@@ -42,7 +42,7 @@ class OCRWorker:
         ocr_config = OCRProcessingConfig()
         self.processor = OCRProcessor(config=ocr_config)
 
-        self.queues = ["files:ocr"]
+        self.queues = FileJob.get_queue_for_module("ocr")
 
         logger.info(f"OCRWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")
@@ -112,7 +112,7 @@ class OCRWorker:
                 if "llm" in allowed and "llm" not in job.completed_modules:
                     job.current_module = "llm"
                     self.redis.set_file_status(job.file_id, job.to_dict())
-                    self.redis.push_to_queue("files:llm", job.to_payload(), priority=job.priority)
+                    self.redis.push_to_queue(FileJob.get_queue_for_module("llm"), job.to_payload(), priority=job.priority)
                     logger.info(f"📤 В очередь LLM: {job.file_id}")
                 else:
                     # Обработка завершена
