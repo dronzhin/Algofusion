@@ -243,6 +243,12 @@ def _render_file_card(
 
         st.divider()
 
+        st.markdown("##### 📋 Классификация")
+        from ui.components.classification_badge import render_classification_info
+        render_classification_info(file, container=st)
+
+        st.divider()
+
         # ====================================================================
         st.markdown("##### ⚙️ Действия")
 

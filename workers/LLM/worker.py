@@ -42,7 +42,7 @@ class LLMWorker:
         llm_config = LLMProcessingConfig()
         self.processor = LLMProcessor(config=llm_config, redis_client=self.redis)
 
-        self.queues = ["files:llm"]
+        self.queues = FileJob.get_queue_for_module("llm")
 
         logger.info(f"LLMWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")
