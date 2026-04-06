@@ -94,6 +94,22 @@ class FileJob:
     EVENT_CHANNEL = "files:events"  # Единый канал для всех событий о файлах
     EVENT_VERSION = "1.0"           # Версия схемы событий (для будущей совместимости)
 
+    # Результат автоматической классификации от LLM
+    llm_classification_type: Optional[str] = None  # "dogovor", "schet", etc.
+    llm_classification_confidence: Optional[float] = None  # 0.0..1.0
+    llm_classification_at: Optional[datetime] = None  # Когда классифицировано
+
+    # Запрос классификации у пользователя
+    user_classification_type: Optional[str] = None  # Выбранный пользователем тип
+    user_classification_requested_at: Optional[datetime] = None  # Когда запросили
+    user_classification_completed_at: Optional[datetime] = None  # Когда пользователь ответил
+
+    # Какой источник классификации активен: "llm" | "user" | None
+    active_classification_source: Optional[str] = None
+
+    # Флаг: требуется ли ручная классификация (для отображения в UI)
+    classification_pending: bool = False
+
     @classmethod
     def validate_payload(cls, payload: str) -> Tuple[bool, List[str]]:
         """
@@ -213,6 +229,17 @@ class FileJob:
                 retry_count=data.get("retry_count", 0),
                 max_retries=data.get("max_retries", 3),
                 history=data.get("history", []),
+                llm_classification_type=data.get("llm_classification_type"),
+                llm_classification_confidence=data.get("llm_classification_confidence"),
+                llm_classification_at=cls._parse_datetime(data["llm_classification_at"]) if data.get(
+                    "llm_classification_at") else None,
+                user_classification_type=data.get("user_classification_type"),
+                user_classification_requested_at=cls._parse_datetime(
+                    data["user_classification_requested_at"]) if data.get("user_classification_requested_at") else None,
+                user_classification_completed_at=cls._parse_datetime(
+                    data["user_classification_completed_at"]) if data.get("user_classification_completed_at") else None,
+                active_classification_source=data.get("active_classification_source"),
+                classification_pending=data.get("classification_pending", False),
                 errors=data.get("errors", [])
             )
         except Exception as e:
@@ -253,6 +280,14 @@ class FileJob:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "history": self.history,
+            "llm_classification_type": self.llm_classification_type,
+            "llm_classification_confidence": self.llm_classification_confidence,
+            "llm_classification_at": self.llm_classification_at.isoformat() if self.llm_classification_at else None,
+            "user_classification_type": self.user_classification_type,
+            "user_classification_requested_at": self.user_classification_requested_at.isoformat() if self.user_classification_requested_at else None,
+            "user_classification_completed_at": self.user_classification_completed_at.isoformat() if self.user_classification_completed_at else None,
+            "active_classification_source": self.active_classification_source,
+            "classification_pending": self.classification_pending,
             "errors": self.errors
         }
 
