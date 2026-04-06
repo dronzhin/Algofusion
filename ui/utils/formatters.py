@@ -1,17 +1,33 @@
+# ui/utils/formatters.py
 """
 Утилиты форматирования для UI.
 Централизует отображение дат, статусов и текста.
 """
 
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 import streamlit as st
 
 from shared.utils.logger import setup_logger
-from ui.utils.constants import FILE_STATUS_CONFIG, UI_CONFIG, LOG_STATUS_CONFIG, EXPORT_STATUS_CONFIG
+from ui.utils.constants import (
+    FILE_STATUS_CONFIG,
+    UI_CONFIG,
+    LOG_STATUS_CONFIG,
+    EXPORT_STATUS_CONFIG,
+    MODULE_ICONS,
+    MODULE_STATUS_EMOJI,
+    MODULE_STATUS_COLORS,
+)
+
+if TYPE_CHECKING:
+    from streamlit.delta_generator import DeltaGenerator
 
 logger = setup_logger("ui.utils.formatters")
 
+
+# ============================================================================
+# 🔹 ФОРМАТИРОВАНИЕ ДАТЫ И ВРЕМЕНИ
+# ============================================================================
 
 def format_datetime_short(dt: Optional[Union[datetime, str]]) -> str:
     """Форматирование даты/времени в коротком формате."""
@@ -37,6 +53,10 @@ def format_datetime_full(dt: Optional[Union[datetime, str]]) -> str:
     return dt.strftime(UI_CONFIG["datetime_format_full"])
 
 
+# ============================================================================
+# 🔹 ФОРМАТИРОВАНИЕ РАЗМЕРА ФАЙЛА
+# ============================================================================
+
 def format_file_size_human(size_bytes: Optional[int]) -> str:
     """Форматирование размера файла (алиас с обработкой None)."""
     if size_bytes is None:
@@ -55,6 +75,10 @@ def format_file_size(size_bytes: int) -> str:
     return format_file_size_human(size_bytes)
 
 
+# ============================================================================
+# 🔹 БЕЙДЖИ СТАТУСОВ ФАЙЛОВ
+# ============================================================================
+
 def render_status_badge(status: str, with_tooltip: bool = True, size: str = "normal") -> str:
     """
     Возвращает HTML для стилизованного бейджа статуса файла.
@@ -67,11 +91,11 @@ def render_status_badge(status: str, with_tooltip: bool = True, size: str = "nor
     color = config["color"]
     bg = config["bg"]
 
-    sizes = {
+    sizes = UI_CONFIG.get("badge_sizes", {
         "small": {"padding": "2px 6px", "font_size": "10px", "radius": "8px"},
         "normal": {"padding": "4px 10px", "font_size": "11px", "radius": "12px"},
         "large": {"padding": "6px 14px", "font_size": "13px", "radius": "16px"},
-    }
+    })
     style = sizes.get(size, sizes["normal"])
     tooltip = f' title="{label}"' if with_tooltip else ''
 
@@ -93,11 +117,15 @@ def render_status_badge(status: str, with_tooltip: bool = True, size: str = "nor
     '''.strip()
 
 
-def render_status_badge_safe(status: str, container, with_tooltip: bool = True, size: str = "normal"):
+def render_status_badge_safe(status: str, container: "DeltaGenerator", with_tooltip: bool = True, size: str = "normal"):
     """Безопасный рендеринг бейджа статуса в Streamlit."""
     html_code = render_status_badge(status, with_tooltip=with_tooltip, size=size)
     container.markdown(html_code, unsafe_allow_html=True)
 
+
+# ============================================================================
+# 🔹 БЕЙДЖИ СТАТУСОВ ЭКСПОРТА В 1С
+# ============================================================================
 
 def render_export_badge(status: str) -> str:
     """Возвращает HTML для бейджа статуса экспорта в 1С."""
@@ -128,7 +156,7 @@ def render_export_badge(status: str) -> str:
     '''.strip()
 
 
-def render_export_badge_safe(status: str, container):
+def render_export_badge_safe(status: str, container: "DeltaGenerator"):
     """Безопасный рендеринг бейджа экспорта."""
     html_code = render_export_badge(status)
     container.markdown(html_code, unsafe_allow_html=True)
@@ -144,11 +172,131 @@ def render_export_status_badge(status: str, with_tooltip: bool = True) -> str:
     return render_export_badge(status)
 
 
-def render_export_status_badge_safe(status: str, container, with_tooltip: bool = True):
+def render_export_status_badge_safe(status: str, container: "DeltaGenerator", with_tooltip: bool = True):
     """Безопасный рендеринг бейджа статуса экспорта в Streamlit."""
     html_code = render_export_status_badge(status, with_tooltip=with_tooltip)
     container.markdown(html_code, unsafe_allow_html=True)
 
+
+# ============================================================================
+# 🔹 НОВОЕ: БЕЙДЖИ СТАТУСОВ МОДУЛЕЙ ОБРАБОТКИ ⭐
+# ============================================================================
+
+def render_module_badge(
+    module: str,
+    status: str,
+    size: str = "small",
+    show_tooltip: bool = True
+) -> str:
+    """
+    Рендерит бейдж статуса модуля обработки файла.
+
+    Принцип: иконка модуля + цвет отражает статус (без дублирования эмодзи).
+
+    Args:
+        module: ключ модуля ('ocr', 'llm', 'export', etc.)
+        status: статус ('completed', 'processing', 'pending', 'failed')
+        size: 'small' | 'normal' | 'large'
+        show_tooltip: показывать ли всплывающую подсказку
+
+    Returns:
+        HTML-строка для markdown с unsafe_allow_html=True
+    """
+    icon = MODULE_ICONS.get(module, "⚙️")
+    color, bg = MODULE_STATUS_COLORS.get(status, MODULE_STATUS_COLORS["pending"])
+
+    sizes = UI_CONFIG.get("badge_sizes", {
+        "small": {"padding": "3px 6px", "font_size": "10px", "radius": "6px"},
+        "normal": {"padding": "4px 8px", "font_size": "11px", "radius": "8px"},
+        "large": {"padding": "5px 10px", "font_size": "12px", "radius": "10px"},
+    })
+    style = sizes.get(size, sizes["small"])
+
+    tooltip = f' title="{module}: {status}"' if show_tooltip else ''
+
+    return f'''
+    <span style="
+        background-color:{bg};
+        color:{color};
+        padding:{style["padding"]};
+        border-radius:{style["radius"]};
+        font-weight:500;
+        font-size:{style["font_size"]};
+        display:inline-block;
+        white-space:nowrap;
+        margin-right:4px;
+        box-shadow:0 1px 2px rgba(0,0,0,0.08);
+        transition:transform 0.1s ease;
+    "{tooltip} onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+        {icon}
+    </span>
+    '''.strip()
+
+
+def render_module_badge_safe(
+    module: str,
+    status: str,
+    container: "DeltaGenerator",
+    size: str = "small",
+    show_tooltip: bool = True
+):
+    """
+    Безопасный рендеринг бейджа модуля в Streamlit.
+
+    Args:
+        module: ключ модуля
+        status: статус модуля
+        container: Streamlit container для рендеринга
+        size: размер бейджа
+        show_tooltip: показывать ли подсказку
+    """
+    html = render_module_badge(module, status, size, show_tooltip)
+    container.markdown(html, unsafe_allow_html=True)
+
+
+def render_module_progress_badge(
+    module: str,
+    is_completed: bool,
+    is_current: bool,
+    size: str = "small"
+) -> str:
+    """
+    Утилита для рендеринга бейджа модуля на основе булевых флагов.
+
+    Args:
+        module: ключ модуля
+        is_completed: модуль завершён
+        is_current: модуль выполняется сейчас
+        size: размер бейджа
+
+    Returns:
+        HTML-строка
+    """
+    if is_completed:
+        status = "completed"
+    elif is_current:
+        status = "processing"
+    else:
+        status = "pending"
+
+    return render_module_badge(module, status, size)
+
+
+def render_module_progress_badge_safe(
+    module: str,
+    is_completed: bool,
+    is_current: bool,
+    container: "DeltaGenerator",
+    size: str = "small"
+):
+    """Безопасная версия render_module_progress_badge для Streamlit."""
+    html = render_module_progress_badge(module, is_completed, is_current, size)
+    container.markdown(html, unsafe_allow_html=True)
+
+
+# ============================================================================
+# 🔹 БЕЙДЖИ ЛОГОВ
+# ============================================================================
 
 def render_log_badge(status: str) -> str:
     """Возвращает HTML для бейджа статуса лога."""
@@ -157,6 +305,10 @@ def render_log_badge(status: str) -> str:
     color = config["color"]
     return f'<span style="color:{color};font-weight:bold;">{emoji} {status}</span>'
 
+
+# ============================================================================
+# 🔹 УТИЛИТЫ ТЕКСТА
+# ============================================================================
 
 def truncate_filename(filename: str, max_length: int = 30, suffix: str = "...") -> str:
     """Обрезка имени файла с суффиксом."""
@@ -167,8 +319,17 @@ def truncate_filename(filename: str, max_length: int = 30, suffix: str = "...") 
     return f"{filename[:prefix_len]}{suffix}{filename[-suffix_len:]}"
 
 
+# ============================================================================
+# 🔹 ПРОГРЕСС ОБРАБОТКИ ПО МОДУЛЯМ
+# ============================================================================
+
 def calculate_module_progress(completed: set, current: Optional[str]) -> tuple[int, list[str]]:
-    """Расчёт прогресса обработки файла по модулям."""
+    """
+    Расчёт прогресса обработки файла по модулям.
+
+    Returns:
+        tuple: (прогресс в %, список строк статуса для каждого модуля)
+    """
     from ui.utils.constants import MODULES_ORDER
 
     total = len(MODULES_ORDER)
@@ -192,21 +353,33 @@ def calculate_module_progress(completed: set, current: Optional[str]) -> tuple[i
 
 
 # ============================================================================
-# PUBLIC API - Явный экспорт функций для импорта
+# 🔹 PUBLIC API — Явный экспорт функций для импорта
 # ============================================================================
 
 __all__ = [
+    # Дата/время
     "format_datetime_short",
     "format_datetime_full",
+    # Размер файла
     "format_file_size",
     "format_file_size_human",
+    # Статусы файлов
     "render_status_badge",
     "render_status_badge_safe",
+    # Статусы экспорта
     "render_export_badge",
     "render_export_badge_safe",
-    "render_export_status_badge",       # ← Явно экспортируем!
-    "render_export_status_badge_safe",  # ← Явно экспортируем!
+    "render_export_status_badge",
+    "render_export_status_badge_safe",
+    # 🔥 НОВОЕ: Статусы модулей
+    "render_module_badge",
+    "render_module_badge_safe",
+    "render_module_progress_badge",
+    "render_module_progress_badge_safe",
+    # Логи
     "render_log_badge",
+    # Текст
     "truncate_filename",
+    # Прогресс
     "calculate_module_progress",
 ]

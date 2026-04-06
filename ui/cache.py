@@ -32,19 +32,23 @@ def get_redis_client_cached():
     return get_redis_client()
 
 
+# ui/cache.py
+
 @st.cache_data(ttl=30, show_spinner="Загрузка статистики...")
 def get_file_stats_cached(_redis_client, _cache_key: str) -> Dict[str, Any]:
     """
     Получение статистики обработки файлов из Redis.
 
-    Args:
-        _redis_client: RedisClient (с подчёркиванием — не хешируется Streamlit)
-        _cache_key: Ключ для инвалидации кэша (также с подчёркиванием)
-
     Returns:
-        Dict с метриками по категориям
+        Dict с метриками по категориям:
+        - uploaded: Загружено (ожидают обработки)
+        - preprocessing: В предобработке
+        - ocr: В OCR
+        - llm: В LLM
+        - pending_export: Обработаны, ожидают экспорта в 1С
+        - exported: Экспортировано в 1С
+        - failed: Ошибки
     """
-    # 🔹 Используем _redis_client внутри функции (имя не имеет значения)
     if not _redis_client:
         return _empty_stats()
 
@@ -71,22 +75,37 @@ def get_file_stats_cached(_redis_client, _cache_key: str) -> Dict[str, Any]:
             completed_modules = set(file_data.get("completed_modules", []))
             export_status = file_data.get("export_status", "pending")
 
+            # 🔹 Обработка по статусу
             if status == "failed":
                 stats["failed"] += 1
+
             elif status == "uploaded":
+                # Файл загружен, но ещё не начал обрабатываться
                 stats["uploaded"] += 1
+
             elif status == "processing":
+                # Файл в обработке — определяем по current_module
                 if current_module == "preprocess":
                     stats["preprocessing"] += 1
                 elif current_module == "ocr":
                     stats["ocr"] += 1
                 elif current_module == "llm":
                     stats["llm"] += 1
+                else:
+                    # Неизвестный модуль — считаем как "в обработке"
+                    stats["uploaded"] += 1
+
             elif status == "completed":
+                # Файл завершён — проверяем статус экспорта
                 if export_status == "success":
                     stats["exported"] += 1
                 else:
+                    # Завершён, но ещё не экспортирован
                     stats["pending_export"] += 1
+
+            elif status == "exported":
+                # Явный статус экспорта (если используется)
+                stats["exported"] += 1
 
         return stats
 

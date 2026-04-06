@@ -8,11 +8,12 @@ import streamlit as st
 from typing import Any, List, Dict, Optional, Callable, Literal
 
 from shared.utils.logger import setup_logger
-from ui.utils.constants import UI_CONFIG, FILE_STATUS_CONFIG
+from ui.utils.constants import UI_CONFIG, FILE_STATUS_CONFIG, MODULES_ORDER
 from ui.utils.formatters import (
     format_datetime_short,
     format_file_size,
     render_status_badge_safe,
+    render_module_badge_safe,
     truncate_filename
 )
 from ui.utils.components import error_handler, render_columns_config, render_action_button, render_empty_state
@@ -113,8 +114,6 @@ def _render_cards_mode(
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Режим карточек с expanders."""
-    from ui.components.file_preview import render_file_preview
-
     st.caption(f"📄 Найдено файлов: {len(files)}")
 
     for idx, file in enumerate(files):
@@ -145,10 +144,7 @@ def _render_file_card(
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
     """
-    Компактная карточка файла.
-
-    Header: 📁 filename (слева) + статус (справа)
-    Content: ID, время, размер + статус предобработки + 4 основные кнопки
+    Компактная карточка файла с отображением прогресса по всем модулям.
     """
     file_id = file.get("file_id", f"file_{idx}")
     filename = file.get("original_filename", "unknown")
@@ -206,69 +202,53 @@ def _render_file_card(
             st.caption("📦 Размер")
             st.write(f"`{size_formatted}`")
 
-        # 🔹 Статус модуля предобработки (автоматический)
-        st.markdown("##### 🔄 Статус обработки")
+        # ====================================================================
+        # 🔹 ПРОГРЕСС ПО МОДУЛЯМ (Централизованный рендеринг)
+        # ====================================================================
+        st.markdown("##### 🔄 Прогресс обработки")
 
-        # Определяем статус предобработки из метаданных файла
         completed_modules = set(file.get("completed_modules", []))
-        current_module = file.get("current_module")
+        current_module = file.get("current_module", "")
 
-        if status == "failed":
-            preprocess_status = "failed"
-        elif "preprocess" in completed_modules:
-            preprocess_status = "completed"
-        elif current_module == "preprocess":
-            preprocess_status = "processing"
-        else:
-            preprocess_status = "pending"
+        def get_module_status(module_name: str) -> str:
+            if status == "failed":
+                return "failed"
+            if module_name in completed_modules:
+                return "completed"
+            if module_name == current_module:
+                return "processing"
+            return "pending"
 
-        # Текст и цвета для бейджа
-        preprocess_badge = {
-            "pending": "⏳ Ожидает",
-            "processing": "🔄 В работе",
-            "completed": "✅ Готово",
-            "failed": "❌ Ошибка",
-        }.get(preprocess_status, "❓ Неизвестно")
+        # 🔹 Создаём колонки для бейджей модулей (строго по порядку из MODULES_ORDER)
+        module_cols = st.columns(len(MODULES_ORDER), gap="small")
 
-        preprocess_colors = {
-            "pending": ("#666", "#e0e0e0"),
-            "processing": ("#856404", "#fff3cd"),
-            "completed": ("#155724", "#d4edda"),
-            "failed": ("#721c24", "#f8d7da"),
-        }
-        color, bg = preprocess_colors.get(preprocess_status, preprocess_colors["pending"])
+        for i, module_name in enumerate(MODULES_ORDER):
+            mod_status = get_module_status(module_name)
+            with module_cols[i]:
+                render_module_badge_safe(
+                    module=module_name,
+                    status=mod_status,
+                    container=module_cols[i],
+                    size="small",
+                    show_tooltip=True
+                )
 
-        # Рендерим бейдж статуса
-        st.markdown(f"""
-        <span style="
-            background-color: {bg};
-            color: {color};
-            padding: 3px 8px;
-            border-radius: 10px;
-            font-weight: 500;
-            font-size: 11px;
-            display: inline-block;
-        ">
-            {preprocess_badge}
-        </span>
-        """, unsafe_allow_html=True)
-
-        # Подсказка о статусе
-        if preprocess_status == "pending" and status == "uploaded":
-            st.caption("💡 Предобработка запустится автоматически")
-        elif preprocess_status == "processing":
-            st.caption("⏳ Обработка в процессе...")
-        elif preprocess_status == "failed":
-            st.caption("🔧 Ошибка — файл будет обработан повторно")
+        # 🔹 Подсказка о текущем этапе
+        if status == "processing" and current_module:
+            st.caption(f"⏳ Сейчас: {current_module}")
+        elif status == "completed":
+            st.caption("✅ Все этапы завершены")
+        elif status == "failed":
+            st.caption("❌ Ошибка обработки — файл будет обработан повторно")
 
         st.divider()
 
-        # 🔹 4 основные кнопки с текстовыми labels
+        # ====================================================================
         st.markdown("##### ⚙️ Действия")
 
         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4, gap="small")
 
-        # Кнопка 1: Скачать оригинал (всегда доступна если файл есть)
+        # Кнопка 1: Скачать оригинал
         with btn_col1:
             if file_service:
                 original_path = file_service.get_download_path(file_id, "original")
@@ -288,8 +268,9 @@ def _render_file_card(
             else:
                 st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
 
-        # Кнопка 2: Скачать предобработанный (только если preprocess completed)
+        # Кнопка 2: Скачать результат предобработки
         with btn_col2:
+            preprocess_status = get_module_status("preprocess")
             if preprocess_status == "completed" and file_service:
                 preprocessed_path = file_service.get_download_path(file_id, "preprocessed")
                 if preprocessed_path and preprocessed_path.exists():
@@ -306,14 +287,12 @@ def _render_file_card(
                 else:
                     st.button("📥 Результат", key=f"dl_prep_{idx}", disabled=True, use_container_width=True)
             else:
-                # Показываем состояние в disabled-кнопке
-                btn_label = "📥 Результат"
                 btn_help = {
                     "pending": "Ожидает обработки",
                     "processing": "Обработка в процессе...",
                     "failed": "Ошибка обработки",
                 }.get(preprocess_status, "Недоступно")
-                st.button(btn_label, key=f"dl_prep_{idx}", disabled=True, use_container_width=True, help=btn_help)
+                st.button("📥 Результат", key=f"dl_prep_{idx}", disabled=True, use_container_width=True, help=btn_help)
 
         # Кнопка 3: Редактировать
         with btn_col3:
@@ -323,11 +302,11 @@ def _render_file_card(
             else:
                 st.button("✏️ Править", key=f"edit_{idx}", disabled=True, use_container_width=True)
 
-        # Кнопка 4: Экспорт в 1С (только если файл завершён)
+        # Кнопка 4: Экспорт в 1С
         with btn_col4:
             if on_export:
-                # Экспорт доступен только для завершённых файлов
-                export_disabled = status not in ("completed", "exported")
+                all_completed = all(get_module_status(m) == "completed" for m in ["preprocess", "ocr", "llm"])
+                export_disabled = not all_completed or status not in ("completed", "exported")
 
                 export_label = "📤 Экспорт"
                 if status == "exported":
@@ -338,7 +317,7 @@ def _render_file_card(
                         key=f"export_{idx}",
                         use_container_width=True,
                         disabled=export_disabled,
-                        help="Экспортировать в 1С" if not export_disabled else "Файл должен быть завершён"
+                        help="Экспортировать в 1С" if not export_disabled else "Завершите все этапы обработки"
                 ):
                     on_export(file_id)
             else:
@@ -347,7 +326,6 @@ def _render_file_card(
 
 def _default_navigate_to_detail(file_id: str, session_state: Any) -> None:
     """Дефолтная навигация (если callback не передан)."""
-    # 🔹 Используем redis_client из session_state
     redis_client = getattr(session_state, "redis_client", None)
 
     if redis_client:
