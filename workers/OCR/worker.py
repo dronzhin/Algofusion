@@ -42,7 +42,7 @@ class OCRWorker:
         ocr_config = OCRProcessingConfig()
         self.processor = OCRProcessor(config=ocr_config)
 
-        self.queues = FileJob.get_queue_for_module("ocr")
+        self.queues = [FileJob.get_queue_for_module("ocr")]
 
         logger.info(f"OCRWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")

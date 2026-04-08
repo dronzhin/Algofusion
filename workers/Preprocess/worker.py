@@ -43,7 +43,7 @@ class ImageProcessorWorker:
         processor_config = ImageProcessingConfig()
         self.processor = ImageProcessor(config=processor_config)
 
-        self.queues = FileJob.get_queue_for_module("preprocess")
+        self.queues = [FileJob.get_queue_for_module("preprocess")]
 
         logger.info(f"ImageProcessorWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")
