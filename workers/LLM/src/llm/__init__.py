@@ -7,7 +7,6 @@ from workers.LLM.src.config import LLMProcessingConfig
 from workers.LLM.src.llm.base import ClassifierEngine, ExtractorEngine, ConverterEngine
 from workers.LLM.src.llm.classifier import OllamaClassifier
 from workers.LLM.src.llm.extractor import OllamaExtractor
-from workers.LLM.src.llm.converter import XmlConverter
 
 
 def create_classifier(config: LLMProcessingConfig) -> ClassifierEngine:
@@ -33,18 +32,9 @@ def create_extractor(config: LLMProcessingConfig) -> ExtractorEngine:
     })
 
 
-def create_converter() -> ConverterEngine:
-    """Фабрика конвертеров."""
-    return XmlConverter({
-        "xml_encoding": "utf-8",
-        "xml_indent": "  ",
-    })
-
-
 __all__ = [
     "create_classifier",
     "create_extractor",
-    "create_converter",
     "ClassifierEngine",
     "ExtractorEngine",
     "ConverterEngine",

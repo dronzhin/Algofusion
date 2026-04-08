@@ -99,7 +99,7 @@ class LLMWorker:
 
             # 🔹 Проверка успеха
             if result_path:
-                # ✅ Успех
+                # ✅ Успех — результат это JSON
                 job.completed_modules.add("llm")
                 job.current_module = None
                 job.updated_at = datetime.now(timezone.utc)
@@ -108,13 +108,21 @@ class LLMWorker:
 
                 # Отправляем в следующую очередь если нужно
                 allowed = job.get_allowed_modules()
+
+                # 🔹 Теперь следующая очередь — export (конвертация JSON → XML)
                 if "export" in allowed and "export" not in job.completed_modules:
                     job.current_module = "export"
+                    # Добавляем путь к JSON в metadata для экспортера
+                    job.metadata["llm_json_path"] = str(result_path.relative_to(self.file_service.base_dir))
                     self.redis.set_file_status(job.file_id, job.to_dict())
-                    self.redis.push_to_queue(FileJob.get_queue_for_module("export"), job.to_payload(), priority=job.priority)
+                    self.redis.push_to_queue(
+                        FileJob.get_queue_for_module("export"),
+                        job.to_payload(),
+                        priority=job.priority
+                    )
                     logger.info(f"📤 В очередь export: {job.file_id}")
                 else:
-                    # Обработка завершена
+                    # Обработка завершена (если export не требуется)
                     job.status = FileStatus.COMPLETED
                     self.redis.set_file_status(job.file_id, job.to_dict())
 
@@ -128,8 +136,6 @@ class LLMWorker:
                     logger.info(f"✅ Завершено: {job.file_id}")
 
                 return True
-            else:
-                raise LLMProcessingError("Результат LLM пуст")
 
         except LLMProcessingError as e:
             logger.error(f"❌ Ошибка LLM: {e}")
