@@ -207,6 +207,34 @@ class RedisClient:
             self._client.close()
         logger.info("Соединения Redis закрыты")
 
+    def set(self, name: str, value: str, **kwargs) -> bool:
+        """Делегирует redis.Redis.set() с обработкой типов."""
+        try:
+            result = self.client.set(name, self._ensure_str(value), **kwargs)
+            return bool(result)
+        except Exception as e:
+            logger.error(f"Ошибка Redis.set({name}): {e}")
+            return False
+
+    def get(self, name: str) -> Optional[str]:
+        """Делегирует redis.Redis.get() с обработкой типов."""
+        try:
+            result = self.client.get(name)
+            return self._ensure_str(result) if result is not None else None
+        except Exception as e:
+            logger.error(f"Ошибка Redis.get({name}): {e}")
+            return None
+
+    def delete(self, *names: str) -> int:
+        """Делегирует redis.Redis.delete() с логированием."""
+        try:
+            result = self.client.delete(*names)
+            logger.debug(f"Удалено ключей из Redis: {result}")
+            return int(result)
+        except Exception as e:
+            logger.error(f"Ошибка Redis.delete({names}): {e}")
+            return 0
+
 
 # Глобальный экземпляр (синглтон)
 _redis_client: Optional[RedisClient] = None

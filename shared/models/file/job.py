@@ -45,7 +45,7 @@ class FileJob:
     config: Dict[str, Any] = field(default_factory=dict)
     priority: int = 0
     callback_url: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)  # Исправлено: было meta Dict
+    metadata: Dict[str, Any] = field(default_factory=dict)
     retry_count: int = 0
     max_retries: int = 3
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
