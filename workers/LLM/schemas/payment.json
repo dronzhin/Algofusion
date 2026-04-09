@@ -1,0 +1,86 @@
+{
+  "document_type": "payment",
+  "description": "Платёжное поручение, платёжное требование или иной платёжный документ",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "enum": ["other"], "description": "Тип документа"},
+      "source_file": {"type": "string", "description": "Имя исходного файла"},
+      "document_number": {"type": "string", "description": "Номер платёжного документа"},
+      "document_date": {"type": "string", "format": "date", "description": "Дата документа (ГГГГ-ММ-ДД)"},
+      "parties": {
+        "type": "object",
+        "properties": {
+          "payer": {
+            "type": "object",
+            "description": "Плательщик",
+            "properties": {
+              "name": {"type": "string", "description": "Наименование плательщика"},
+              "account": {"type": "string", "description": "Расчётный счёт плательщика"},
+              "bank": {"type": "string", "description": "Банк плательщика"},
+              "tax_id": {"type": "string", "description": "УНП/ИНН плательщика"},
+              "bank_id": {"type": "string", "description": "БИК/код банка плательщика"}
+            },
+            "required": ["name"]
+          },
+          "payee": {
+            "type": "object",
+            "description": "Получатель",
+            "properties": {
+              "name": {"type": "string", "description": "Наименование получателя"},
+              "account": {"type": "string", "description": "Расчётный счёт получателя"},
+              "bank": {"type": "string", "description": "Банк получателя"},
+              "tax_id": {"type": "string", "description": "УНП/ИНН получателя"},
+              "bank_id": {"type": "string", "description": "БИК/код банка получателя"}
+            },
+            "required": ["name"]
+          }
+        },
+        "required": ["payer", "payee"]
+      },
+      "payment_details": {
+        "type": "object",
+        "properties": {
+          "amount": {"type": "number", "description": "Сумма платежа (числом)"},
+          "currency": {"type": "string", "description": "Валюта (BYN, RUB, USD, EUR)"},
+          "purpose": {"type": "string", "description": "Назначение платежа"}
+        },
+        "required": ["amount", "currency", "purpose"]
+      },
+      "contract_basis": {"type": "string", "description": "Основание платежа (договор, счёт, акт)"},
+      "notes": {"type": "string", "description": "Дополнительные примечания, коды, ссылки"}
+    },
+    "required": ["document_number", "document_date", "parties", "payment_details"],
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "payment",
+    "source_file": "payment_2024_089.pdf",
+    "document_number": "ПП-2024-089",
+    "document_date": "2024-03-21",
+    "parties": {
+      "payer": {
+        "name": "ООО \"Вектор\"",
+        "account": "BY12ABCD30120000000001234567",
+        "bank": "ОАО \"Беларусбанк\"",
+        "tax_id": "191234890",
+        "bank_id": "AKBBBY2X"
+      },
+      "payee": {
+        "name": "ООО \"Ромашка\"",
+        "account": "BY98XYZH30120000000009876543",
+        "bank": "ОАО \"Приорбанк\"",
+        "tax_id": "190234567",
+        "bank_id": "PJCBBY2X"
+      }
+    },
+    "payment_details": {
+      "amount": 12500.0,
+      "currency": "BYN",
+      "purpose": "Оплата по счёту №СЧ-2024-045 от 20.03.2024 за консультационные услуги, без НДС"
+    },
+    "contract_basis": "Договор №ДГ-2024-001 от 15.03.2024",
+    "notes": "Код вида платежа: 101, Срочность: обычная"
+  },
+  "prompt_hints": "Это платёжный документ. Сумму указывай числом без пробелов и валюты (12500.0, а не '12 500,00'). Даты в формате ГГГГ-ММ-ДД. Назначение платежа извлекай полностью, как указано в документе. Банковские реквизиты (счета, БИК) извлекай, если они явно указаны. Если поле не найдено — используй null."
+}

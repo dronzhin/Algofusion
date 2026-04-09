@@ -42,18 +42,27 @@ class LLMProcessor:
         self.redis = redis_client
         self.file_service = file_service
 
-        engine_config = {
+        # 🔹 Конфиг для классификатора (быстрая модель)
+        classifier_config = {
             "ollama_endpoint": config.ollama_endpoint,
-            "ollama_model": config.ollama_model,
+            "ollama_model": config.classifier_model,
             "ollama_timeout": config.ollama_timeout,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "json_mode": config.json_mode,
+            "json_mode": True,
             "allowed_doc_types": list(config.allowed_doc_types),
         }
 
-        self.classifier = OllamaClassifier(engine_config)
-        self.extractor = OllamaExtractor(engine_config)
+        # 🔹 Конфиг для экстрактора (мощная модель)
+        extractor_config = {
+            "ollama_endpoint": config.ollama_endpoint,
+            "ollama_model": config.extractor_model,
+            "ollama_timeout": config.ollama_timeout,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "json_mode": True,
+        }
+
+        self.classifier = OllamaClassifier(classifier_config)
+        self.extractor = OllamaExtractor(extractor_config)
 
     def process(
             self,

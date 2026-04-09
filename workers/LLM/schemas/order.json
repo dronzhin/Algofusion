@@ -1,0 +1,69 @@
+{
+  "document_type": "order",
+  "description": "Заказ, приказ, распоряжение или иной документ",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "enum": ["other"]},
+      "source_file": {"type": "string"},
+      "document_number": {"type": "string", "description": "Номер документа"},
+      "document_date": {"type": "string", "format": "date"},
+      "organization": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Наименование организации"},
+          "unp": {"type": "string", "description": "УНП/ИНН"},
+          "city": {"type": "string", "description": "Город"}
+        },
+        "required": ["name"]
+      },
+      "order_title": {"type": "string", "description": "Заголовок/тема документа"},
+      "employees": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "full_name": {"type": "string", "description": "ФИО сотрудника"},
+            "position": {"type": "string", "description": "Должность"},
+            "action": {"type": "string", "description": "Действие/поручение"}
+          },
+          "required": ["full_name"]
+        }
+      },
+      "basis": {"type": "string", "description": "Основание для издания документа"},
+      "signatory": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "ФИО подписанта"},
+          "position": {"type": "string", "description": "Должность подписанта"}
+        },
+        "required": ["name", "position"]
+      },
+      "notes": {"type": "string", "description": "Дополнительные примечания"}
+    },
+    "required": ["document_number", "document_date", "organization"],
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "payment",
+    "source_file": "prikaz_034.pdf",
+    "document_number": "ПР-2024-034",
+    "document_date": "2024-03-18",
+    "organization": {
+      "name": "ООО \"Ромашка\"",
+      "unp": "190234567",
+      "city": "г. Минск"
+    },
+    "order_title": "О направлении сотрудника в командировку",
+    "employees": [
+      {"full_name": "Петров Иван Сергеевич", "position": "Ведущий инженер", "action": "Направлен в командировку в г. Москва на 3 дня"}
+    ],
+    "basis": "План командировок на 2024 год",
+    "signatory": {
+      "name": "Сидоров А.В.",
+      "position": "Генеральный директор"
+    },
+    "notes": "Командировочные расходы возмещаются согласно положению об командировках"
+  },
+  "prompt_hints": "Это приказ/распоряжение/заказ. Извлекай ФИО и должности полностью. Даты в формате ГГГГ-ММ-ДД. Если документ содержит несколько поручений — перечисли их в массиве employees."
+}

@@ -1,0 +1,50 @@
+{
+  "document_type": "unknown",
+  "description": "Документ неизвестного или неопределённого типа",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "enum": ["unknown"]},
+      "source_file": {"type": "string"},
+      "document_number": {"type": "string"},
+      "document_date": {"type": "string", "format": "date"},
+      "parties": {
+        "type": "object",
+        "properties": {
+          "supplier": {"type": "object", "properties": {"name": {"type": "string"}}},
+          "customer": {"type": "object", "properties": {"name": {"type": "string"}}}
+        }
+      },
+      "total_amount": {"type": "number"},
+      "currency": {"type": "string"},
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {"type": "string"},
+            "quantity": {"type": "number"},
+            "amount": {"type": "number"}
+          }
+        }
+      },
+      "notes": {"type": "string"}
+    },
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "unknown",
+    "source_file": "doc_scan.pdf",
+    "document_number": null,
+    "document_date": "2024-03-20",
+    "parties": {
+      "supplier": {"name": "Организация А"},
+      "customer": {"name": "Организация Б"}
+    },
+    "total_amount": 10000,
+    "currency": "BYN",
+    "items": [],
+    "notes": "Документ требует ручной проверки"
+  },
+  "prompt_hints": "Тип документа не определён. Извлекай только явно указанные данные. Если поле не найдено — используй null. Не выдумывай значения."
+}

@@ -1,0 +1,93 @@
+{
+  "document_type": "waybill",
+  "description": "Товарная накладная (форма ТОРГ-12 или аналог)",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "enum": ["waybill"]},
+      "source_file": {"type": "string"},
+      "document_number": {"type": "string", "description": "Номер накладной"},
+      "document_date": {"type": "string", "format": "date"},
+      "parties": {
+        "type": "object",
+        "properties": {
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "address": {"type": "string"},
+              "tax_id": {"type": "string"}
+            },
+            "required": ["name"]
+          },
+          "customer": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "address": {"type": "string"},
+              "tax_id": {"type": "string"}
+            },
+            "required": ["name"]
+          }
+        },
+        "required": ["supplier", "customer"]
+      },
+      "contract_basis": {"type": "string", "description": "Основание отгрузки"},
+      "currency": {"type": "string"},
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {"type": "string"},
+            "unit": {"type": "string"},
+            "quantity": {"type": "number"},
+            "unit_price": {"type": "number"},
+            "amount": {"type": "number"},
+            "vat_rate": {"type": "number"},
+            "vat_amount": {"type": "number"},
+            "total_incl_vat": {"type": "number"}
+          },
+          "required": ["description", "quantity", "amount"]
+        }
+      },
+      "totals": {
+        "type": "object",
+        "properties": {
+          "total_quantity": {"type": "number", "description": "Общее количество мест/единиц"},
+          "total_excl_vat": {"type": "number"},
+          "vat_amount": {"type": "number"},
+          "total_incl_vat": {"type": "number"}
+        },
+        "required": ["total_incl_vat"]
+      },
+      "notes": {"type": "string", "description": "Примечания, условия отгрузки"}
+    },
+    "required": ["document_number", "document_date", "parties", "items", "totals"],
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "waybill",
+    "source_file": "nakladnaya_078.pdf",
+    "document_number": "ТН-2024-078",
+    "document_date": "2024-03-22",
+    "parties": {
+      "supplier": {"name": "ООО \"Ромашка\"", "address": "г. Минск, ул. Ленина, 10", "tax_id": "190234567"},
+      "customer": {"name": "ООО \"Вектор\"", "address": "г. Минск, пр. Независимости, 50", "tax_id": "191234890"}
+    },
+    "contract_basis": "Договор №ДГ-2024-001",
+    "currency": "BYN",
+    "items": [
+      {"description": "Ноутбук Lenovo ThinkPad", "unit": "шт", "quantity": 2, "unit_price": 2500, "amount": 5000, "vat_rate": 20, "vat_amount": 1000, "total_incl_vat": 6000},
+      {"description": "Мышь беспроводная", "unit": "шт", "quantity": 5, "unit_price": 48, "amount": 240, "vat_rate": 20, "vat_amount": 48, "total_incl_vat": 288}
+    ],
+    "totals": {
+      "total_quantity": 7,
+      "total_excl_vat": 5240,
+      "vat_amount": 1048,
+      "total_incl_vat": 6288
+    },
+    "notes": "Отгружено со склада №3, транспортная компания: БелПочта"
+  },
+  "prompt_hints": "Это товарная накладная. Извлекай все позиции из таблицы товаров. Количества и суммы — числами. Если есть номера ГТД или сертификаты — добавь в notes."
+}

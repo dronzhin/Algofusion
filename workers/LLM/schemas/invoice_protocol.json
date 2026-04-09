@@ -1,0 +1,105 @@
+{
+  "document_type": "invoice_protocol",
+  "description": "Счет-протокол (акт выполненных работ/оказанных услуг)",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "enum": ["invoice_protocol"]},
+      "source_file": {"type": "string"},
+      "document_number": {"type": "string", "description": "Номер документа"},
+      "document_date": {"type": "string", "format": "date", "description": "Дата (ГГГГ-ММ-ДД)"},
+      "parties": {
+        "type": "object",
+        "properties": {
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "address": {"type": "string"},
+              "tax_id": {"type": "string"}
+            },
+            "required": ["name"]
+          },
+          "customer": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "address": {"type": "string"},
+              "tax_id": {"type": "string"}
+            },
+            "required": ["name"]
+          }
+        },
+        "required": ["supplier", "customer"]
+      },
+      "contract_basis": {"type": "string", "description": "Основание (договор)"},
+      "currency": {"type": "string"},
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {"type": "string"},
+            "unit": {"type": "string"},
+            "quantity": {"type": "number"},
+            "unit_price_incl_vat": {"type": "number"},
+            "amount_no_disc_incl_vat": {"type": "number"},
+            "disc_amount": {"type": "number"},
+            "amount_with_disc_excl_vat": {"type": "number"},
+            "vat_rate": {"type": "number"},
+            "vat_amount": {"type": "number"},
+            "total_incl_vat": {"type": "number"}
+          },
+          "required": ["description", "quantity", "total_incl_vat"]
+        }
+      },
+      "totals": {
+        "type": "object",
+        "properties": {
+          "vat_amount": {"type": "number"},
+          "total_incl_vat": {"type": "number"},
+          "total_in_words": {"type": "string"},
+          "currency": {"type": "string"}
+        },
+        "required": ["total_incl_vat"]
+      },
+      "notes": {"type": "string"}
+    },
+    "required": ["document_number", "document_date", "parties", "totals"],
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "invoice_protocol",
+    "source_file": "akt_012.pdf",
+    "document_number": "АП-2024-012",
+    "document_date": "2024-03-25",
+    "parties": {
+      "supplier": {"name": "ООО \"Ромашка\"", "tax_id": "190234567"},
+      "customer": {"name": "ООО \"Вектор\"", "tax_id": "191234890"}
+    },
+    "contract_basis": "Договор №ДГ-2024-001 от 15.03.2024",
+    "currency": "BYN",
+    "items": [
+      {
+        "description": "Разработка технического задания",
+        "unit": "услуга",
+        "quantity": 1,
+        "unit_price_incl_vat": 2400.0,
+        "amount_no_disc_incl_vat": 2400.0,
+        "disc_amount": 0,
+        "amount_with_disc_excl_vat": 2000.0,
+        "vat_rate": 20,
+        "vat_amount": 400.0,
+        "total_incl_vat": 2400.0
+      }
+    ],
+    "totals": {
+      "vat_amount": 400.0,
+      "total_incl_vat": 2400.0,
+      "total_in_words": "Две тысячи четыреста рублей 00 копеек",
+      "currency": "BYN"
+    },
+    "notes": "Работы выполнены в полном объёме, претензий нет"
+  },
+  "prompt_hints": "Это акт выполненных работ. Даты в формате ГГГГ-ММ-ДД. Суммы — числами. Если в документе есть подписи сторон — извлеки имена и должности в notes."
+}

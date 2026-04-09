@@ -20,6 +20,7 @@ class FileStatus(str, Enum):
     EXPORTED = "exported"
     FAILED = "failed"
 
+
 _VALID_STATUSES = [s.value for s in FileStatus]
 
 
@@ -35,28 +36,31 @@ class DocumentType(str, Enum):
     INVOICE = "invoice"
     INVOICE_PROTOCOL = "invoice_protocol"
     WAYBILL = "waybill"
-    OTHER = "other"
-    UNKNOWN = "unknown"
+    PAYMENT = "payment"  # 🔹 НОВОЕ: Платёжное поручение
+    ORDER = "order"  # 🔹 НОВОЕ: Приказ / Распоряжение
+    UNKNOWN = "unknown"  # 🔹 ЕДИНСТВЕННЫЙ fallback-тип
 
     _LABELS = {
         "contract": "Договор",
         "invoice": "Счет",
         "invoice_protocol": "Счет-протокол",
         "waybill": "Товарная накладная",
-        "other": "Другое",
+        "payment": "Платёжное поручение",
+        "order": "Приказ / Распоряжение",
         "unknown": "Неизвестно"
     }
 
     # Маппинг всех известных вариантов → канонические Enum
-    # Определён на уровне класса, чтобы не пересоздаваться при каждом вызове
     _PARSE_MAP: Dict[str, "DocumentType"] = {
         # Английские каноничные
         "contract": CONTRACT,
         "invoice": INVOICE,
         "invoice_protocol": INVOICE_PROTOCOL,
         "waybill": WAYBILL,
-        "other": OTHER,
+        "payment": PAYMENT,
+        "order": ORDER,
         "unknown": UNKNOWN,
+
         # Русские (после нормализации)
         "договор": CONTRACT,
         "счет": INVOICE,
@@ -65,12 +69,23 @@ class DocumentType(str, Enum):
         "счёт_протокол": INVOICE_PROTOCOL,
         "товарная_накладная": WAYBILL,
         "накладная": WAYBILL,
-        "другое": OTHER,
+        "платёжное_поручение": PAYMENT,
+        "платежное_поручение": PAYMENT,
+        "платежка": PAYMENT,
+        "платёжка": PAYMENT,
+        "приказ": ORDER,
+        "распоряжение": ORDER,
+        "заказ": ORDER,  # Часто используется как синоним приказа/распоряжения
         "неизвестно": UNKNOWN,
-        # Частые сокращения/опечатки
+        "другое": UNKNOWN,  # 🔹 "Другое" теперь маппится на UNKNOWN
+
+        # Сокращения/опечатки
         "сч_протокол": INVOICE_PROTOCOL,
         "т_накладная": WAYBILL,
         "тов_накладная": WAYBILL,
+        "пл_поручение": PAYMENT,
+        "плат_поруч": PAYMENT,
+        "приказ_по_орг": ORDER,
     }
 
     @property

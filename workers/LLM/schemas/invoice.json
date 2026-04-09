@@ -1,0 +1,105 @@
+{
+  "document_type": "invoice",
+  "description": "Счёт на оплату товаров или услуг",
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "document_type": {"type": "string", "description": "Тип документа", "enum": ["invoice"]},
+      "source_file": {"type": "string", "description": "Имя исходного файла"},
+      "document_number": {"type": "string", "description": "Номер счёта"},
+      "document_date": {"type": "string", "format": "date", "description": "Дата счёта (ГГГГ-ММ-ДД)"},
+      "parties": {
+        "type": "object",
+        "properties": {
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string", "description": "Наименование поставщика"},
+              "address": {"type": "string", "description": "Адрес поставщика"},
+              "tax_id": {"type": "string", "description": "УНП/ИНН поставщика"}
+            },
+            "required": ["name"]
+          },
+          "customer": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string", "description": "Наименование покупателя"},
+              "address": {"type": "string", "description": "Адрес покупателя"},
+              "tax_id": {"type": "string", "description": "УНП/ИНН покупателя"}
+            },
+            "required": ["name"]
+          }
+        },
+        "required": ["supplier", "customer"]
+      },
+      "contract_basis": {"type": "string", "description": "Основание (договор, заказ)"},
+      "currency": {"type": "string", "description": "Валюта (BYN, RUB, USD)"},
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {"type": "string", "description": "Наименование товара/услуги"},
+            "unit": {"type": "string", "description": "Единица измерения"},
+            "quantity": {"type": "number", "description": "Количество"},
+            "unit_price_incl_vat": {"type": "number", "description": "Цена за ед. с НДС"},
+            "amount_no_disc_incl_vat": {"type": "number", "description": "Сумма без скидки с НДС"},
+            "disc_amount": {"type": "number", "description": "Сумма скидки"},
+            "amount_with_disc_excl_vat": {"type": "number", "description": "Сумма со скидкой без НДС"},
+            "vat_rate": {"type": "number", "description": "Ставка НДС (%)"},
+            "vat_amount": {"type": "number", "description": "Сумма НДС"},
+            "total_incl_vat": {"type": "number", "description": "Итого с НДС"}
+          },
+          "required": ["description", "quantity", "total_incl_vat"]
+        }
+      },
+      "totals": {
+        "type": "object",
+        "properties": {
+          "vat_amount": {"type": "number", "description": "Всего НДС"},
+          "total_incl_vat": {"type": "number", "description": "Всего к оплате с НДС"},
+          "total_in_words": {"type": "string", "description": "Сумма прописью"},
+          "currency": {"type": "string", "description": "Валюта итога"}
+        },
+        "required": ["total_incl_vat"]
+      },
+      "notes": {"type": "string", "description": "Дополнительные примечания"}
+    },
+    "required": ["document_number", "document_date", "parties", "totals"],
+    "additionalProperties": false
+  },
+  "example": {
+    "document_type": "invoice",
+    "source_file": "schet_045.pdf",
+    "document_number": "СЧ-2024-045",
+    "document_date": "2024-03-20",
+    "parties": {
+      "supplier": {"name": "ООО \"Ромашка\"", "address": "г. Минск, ул. Ленина, 10", "tax_id": "190234567"},
+      "customer": {"name": "ООО \"Вектор\"", "address": "г. Минск, пр. Независимости, 50", "tax_id": "191234890"}
+    },
+    "contract_basis": "Договор №ДГ-2024-001",
+    "currency": "BYN",
+    "items": [
+      {
+        "description": "Консультационные услуги",
+        "unit": "час",
+        "quantity": 10,
+        "unit_price_incl_vat": 120.0,
+        "amount_no_disc_incl_vat": 1200.0,
+        "disc_amount": 0,
+        "amount_with_disc_excl_vat": 1000.0,
+        "vat_rate": 20,
+        "vat_amount": 200.0,
+        "total_incl_vat": 1200.0
+      }
+    ],
+    "totals": {
+      "vat_amount": 200.0,
+      "total_incl_vat": 1200.0,
+      "total_in_words": "Одна тысяча двести рублей 00 копеек",
+      "currency": "BYN"
+    },
+    "notes": "Оплата в течение 10 банковских дней"
+  },
+  "prompt_hints": "Даты в формате ГГГГ-ММ-ДД. Суммы — числами без пробелов и валюты. НДС указывай в процентах (20, а не '20%'). Если поле не найдено — используй null."
+}
