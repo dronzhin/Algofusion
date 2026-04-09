@@ -1,4 +1,5 @@
 # docker-compose.yml
+version: "3.8"
 
 services:
   # ============================================================================
@@ -8,7 +9,7 @@ services:
     image: redis:7-alpine
     container_name: algofusion-redis
     ports:
-      - "6379:6379"  # ← Для отладки, в продакшене убрать
+      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -34,11 +35,13 @@ services:
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - SHARED_FILES_PATH=/shared/files
-      - LOG_LEVEL=INFO
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
+      - STREAMLIT_SERVER_PORT=${STREAMLIT_SERVER_PORT:-8501}
+      - STREAMLIT_SERVER_ADDRESS=${STREAMLIT_SERVER_ADDRESS:-0.0.0.0}
     depends_on:
       redis:
         condition: service_healthy
@@ -59,24 +62,21 @@ services:
       context: .
       dockerfile: monitor/Dockerfile
     container_name: algofusion-file-monitor
-
-    # ← Запуск от имени текущего пользователя хоста
     user: "${UID:-1000}:${GID:-1000}"
-
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
       - ${HOST_INCOMING_PATH:-/home/dmitry/incoming}:/external/incoming:rw
-
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - SHARED_FILES_PATH=/shared/files
-      - EXTERNAL_MONITOR_PATH=/external/incoming
-      - LOG_LEVEL=INFO
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      - EXTERNAL_MONITOR_PATH=${EXTERNAL_MONITOR_PATH:-/external/incoming}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
+      - MONITOR_INTERVAL=${MONITOR_INTERVAL:-5}
+      - MONITOR_PATTERNS=${MONITOR_PATTERNS:-*.pdf,*.png,*.jpg}
       - CONTAINER_UID=${UID:-1000}
       - CONTAINER_GID=${GID:-1000}
-
     depends_on:
       redis:
         condition: service_healthy
@@ -85,55 +85,46 @@ services:
     restart: unless-stopped
 
   # ============================================================================
+  # PREPROCESSOR - Предобработка изображений
   # ============================================================================
   processor:
     build:
       context: .
       dockerfile: workers/Preprocess/Dockerfile
-#      dockerfile: workers/preprocessing_stage_1/Dockerfile
     container_name: algofusion-processor
     restart: unless-stopped
-
-    # ← Запуск от имени текущего пользователя (совместимо с file-monitor)
     user: "${UID:-1000}:${GID:-1000}"
-
     volumes:
-      # Shared files для чтения оригиналов и записи результатов
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
-
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - SHARED_FILES_PATH=/shared/files
-      - LOG_LEVEL=INFO
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
-      - PROCESSOR_PDF_DPI=600
-      - PROCESSOR_BG_THRESHOLD=128
-      - PROCESSOR_BIN_THRESHOLD=128
-      - PROCESSOR_MEDIAN_ITER=5
-      - PROCESSOR_MEDIAN_SIZE=3
-      - PROCESSOR_ROT_ANGLE_THRESH=0.5
-      - PROCESSOR_ROT_SCALE=1.0
-
+      - PROCESSOR_PDF_DPI=${PROCESSOR_PDF_DPI:-600}
+      - PROCESSOR_BG_THRESHOLD=${PROCESSOR_BG_THRESHOLD:-128}
+      - PROCESSOR_BIN_THRESHOLD=${PROCESSOR_BIN_THRESHOLD:-128}
+      - PROCESSOR_MEDIAN_ITER=${PROCESSOR_MEDIAN_ITER:-5}
+      - PROCESSOR_MEDIAN_SIZE=${PROCESSOR_MEDIAN_SIZE:-3}
+      - PROCESSOR_ROT_ANGLE_THRESH=${PROCESSOR_ROT_ANGLE_THRESH:-0.5}
+      - PROCESSOR_ROT_SCALE=${PROCESSOR_ROT_SCALE:-1.0}
     depends_on:
       redis:
         condition: service_healthy
-
     networks:
       - app-network
-
-    # Ограничение ресурсов (важно для обработки изображений)
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '${PROCESSOR_CPU_LIMIT:-2}'
+          memory: '${PROCESSOR_MEMORY_LIMIT:-2G}'
         reservations:
           cpus: '0.5'
           memory: 512M
 
   # ============================================================================
-  # 🆕 OCR - Распознавание текста (автоматическое)
+  # OCR - Распознавание текста
   # ============================================================================
   ocr:
     build:
@@ -141,88 +132,149 @@ services:
       dockerfile: workers/OCR/Dockerfile
     container_name: algofusion-ocr
     restart: unless-stopped
-
     user: "${UID:-1000}:${GID:-1000}"
-
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
-
     environment:
-      # Redis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      # Files
-      - SHARED_FILES_PATH=/shared/files
-      # Logging
-      - LOG_LEVEL=INFO
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
-      # OCR settings
-      - OCR_DEFAULT_ENGINE=tesseract
-      - OCR_DEFAULT_LANG=rus+eng
+      - OCR_DEFAULT_ENGINE=${OCR_ENGINE:-tesseract}
+      - OCR_DEFAULT_LANG=${OCR_LANGS:-rus+eng}
       - OCR_TESSERACT_OEM=1
       - OCR_TESSERACT_PSM=11
-      - OCR_TESSERACT_PREPROCESS=0
-      - OCR_TESSERACT_DPI=300
+      - OCR_TESSERACT_DPI=${OCR_DPI:-300}
       - OCR_EASYOCR_GPU=0
       - OCR_EASYOCR_MIN_SCORE=0.5
-
     depends_on:
       redis:
         condition: service_healthy
       processor:
-        condition: service_started  # OCR зависит от результатов preprocess
-
+        condition: service_started
     networks:
       - app-network
-
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '${OCR_CPU_LIMIT:-2}'
+          memory: '${OCR_MEMORY_LIMIT:-2G}'
         reservations:
           cpus: '0.5'
           memory: 512M
 
-  # worker-llm:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-llm
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=llm
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/llm_worker.py"]
-  #   restart: unless-stopped
+  # ============================================================================
+  # 🆕 OLLAMA - LLM inference server
+  # ============================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: algofusion-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+      - ./workers/LLM/ollama_init:/ollama_init:ro
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-3}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+      - OLLAMA_MODELS=${LLM_MODELS:-qwen2.5:1.5b,gemma2:2b,phi3:mini-3.8b,qwen2.5:7b,llama3.1:8b}
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    command: >
+      sh -c "
+        if [ -f /ollama_init/init_models.sh ]; then
+          echo '🔄 Запуск инициализации моделей...';
+          /ollama_init/init_models.sh;
+        fi;
+        echo '🚀 Запуск Ollama server...';
+        /bin/ollama serve
+      "
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '${OLLAMA_CPU_LIMIT:-4}'
+#          memory: '${OLLAMA_MEMORY_LIMIT:-16G}'
+#        reservations:
+#          cpus: '1'
+#          memory: 4G
+    # Раскомментируйте для GPU:
+   deploy:
+     resources:
+       reservations:
+         devices:
+           - driver: nvidia
+             count: 1
+             capabilities: [gpu]
 
-  # worker-export:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: algofusion-worker-export
-  #   volumes:
-  #     - ./shared/files:/shared/files
-  #   environment:
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - WORKER_TYPE=export
-  #     - LOG_LEVEL=INFO
-  #     - PYTHONPATH=/app
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - app-network
-  #   command: ["python", "workers/export_worker.py"]
-  #   restart: unless-stopped
+  # ============================================================================
+  # 🆕 LLM Worker - Классификация и экстракция через Ollama
+  # ============================================================================
+  llm:
+    build:
+      context: .
+      dockerfile: workers/LLM/Dockerfile
+    container_name: algofusion-llm
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+      - ./workers/LLM/schemas:/app/workers/LLM/schemas:ro
+    environment:
+      # === Redis ===
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      # === Files ===
+      - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      # === Logging ===
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONPATH=/app
+      # === LLM / Ollama ===
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-http://ollama:11434}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:7b}
+      - LLM_CLASSIFIER_MODEL=${LLM_CLASSIFIER_MODEL:-qwen2.5:1.5b}
+      - LLM_EXTRACTOR_MODEL=${LLM_EXTRACTOR_MODEL:-qwen2.5:7b}
+      - LLM_TIMEOUT=120
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.1}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - LLM_JSON_MODE=${LLM_JSON_MODE:-true}
+      # === Классификация ===
+      - LLM_CLASSIFY_THRESHOLD=${LLM_CLASSIFY_THRESHOLD:-0.85}
+      - LLM_PENDING_TIMEOUT_MIN=${LLM_PENDING_TIMEOUT_MIN:-30}
+      - LLM_PENDING_RECHECK_SEC=${LLM_PENDING_RECHECK_SEC:-30}
+      - LLM_MAX_PENDING_REQUEUES=${LLM_MAX_PENDING_REQUEUES:-20}
+      # === Экстракция ===
+      - LLM_SCHEMAS_PATH=${LLM_SCHEMAS_PATH:-/app/workers/LLM/schemas}
+      - LLM_OUTPUT_FORMAT=${LLM_OUTPUT_FORMAT:-xml}
+      # === Retry ===
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - LLM_RETRY_DELAY=${LLM_RETRY_DELAY:-2.0}
+      # === Документы ===
+      - LLM_ALLOWED_DOC_TYPES=${LLM_ALLOWED_DOC_TYPES:-dogovor,schet,tovarnaya_nakladnaya,schet_protokol,unknown}
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: '${LLM_WORKER_CPU_LIMIT:-2}'
+          memory: '${LLM_WORKER_MEMORY_LIMIT:-4G}'
+        reservations:
+          cpus: '1'
+          memory: 1G
 
 # ============================================================================
 # VOLUMES
@@ -230,10 +282,16 @@ services:
 volumes:
   redis_data:
     driver: local
+    labels:
+      - "com.algofusion.description=Redis persistent data"
   processor_work:
     driver: local
   ocr_work:
     driver: local
+  ollama_models:
+    driver: local
+    labels:
+      - "com.algofusion.description=Ollama models cache"
 
 # ============================================================================
 # NETWORKS

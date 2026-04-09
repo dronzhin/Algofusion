@@ -1,49 +1,34 @@
 # workers/LLM/Dockerfile
-FROM python:3.11-slim-bookworm
-
-# Метаданные
-LABEL maintainer="Dmitry Ronzhin <dmitry@algofusion.ru>"
-LABEL description="Algofusion LLM Worker with Ollama integration"
-
-# Переменные окружения
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
-
-# Системные зависимости
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    jq \
-    && rm -rf /var/lib/apt/lists/*
-
-# Пользователь для безопасности (совместимо с file-monitor)
-ARG UID=1000
-ARG GID=1000
-RUN groupadd -g ${GID} algofusion && \
-    useradd -u ${UID} -g algofusion -m -s /bin/bash algofusion
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Зависимости
-COPY workers/LLM/requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && \
-    pip install -r /app/requirements.txt
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Исходный код
+# Копирование requirements
+COPY workers/LLM/requirements.txt /app/workers/LLM/requirements.txt
+
+# Установка Python-зависимостей
+RUN pip install --no-cache-dir -r /app/workers/LLM/requirements.txt \
+
+# Копирование кода
 COPY shared/ /app/shared/
+COPY core/ /app/core/
 COPY workers/LLM/ /app/workers/LLM/
 
-# Директории
-RUN mkdir -p /shared/files /app/workers/LLM/schemas /app/workers/LLM/prompts && \
-    chown -R algofusion:algofusion /app /shared/files
-
-USER algofusion
+# Создаём пользователя для безопасности
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g ${GID} appuser && useradd -u ${UID} -g appuser -m appuser
+RUN chown -R appuser:appuser /app
+USER appuser
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import redis; r=redis.Redis(host='${REDIS_HOST:-redis}', port=${REDIS_PORT:-6379}); r.ping()" || exit 1
+    CMD python -c "from workers.LLM.src.config import LLMProcessingConfig; print('OK')" || exit 1
 
-CMD ["python", "-m", "workers.LLM.worker"]
+# Запуск воркера
+CMD ["python", "workers/LLM/worker.py"]
