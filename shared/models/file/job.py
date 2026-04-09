@@ -1,12 +1,19 @@
+#!/usr/bin/env python3
 # shared/models/file/job.py
+"""
+Модель задания на обработку файла.
+Содержит метаданные, состояние, маршрутизацию и константы очередей/каналов.
+"""
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, ClassVar
 import json
 
 from shared.utils.logger import setup_logger
-from .enums import FileType, FileStatus, ExportStatus, DocumentType, ExportConfig
-from .serializer import to_dict as _to_dict, from_payload as _from_payload, from_payload_safe as _from_payload_safe, validate_payload as _validate_payload
+from .enums import FileType, FileStatus, ExportStatus, ExportConfig
+from .serializer import to_dict as _to_dict, from_payload as _from_payload, from_payload_safe as _from_payload_safe, \
+    validate_payload as _validate_payload
 from .routing import (
     get_queue_for_module as _get_queue_for_module, get_all_queues as _get_all_queues,
     is_valid_queue_module as _is_valid_queue_module, detect_file_type as _detect_file_type,
@@ -24,8 +31,10 @@ from .events import (
 
 logger = setup_logger("shared.models.file.job")
 
+
 @dataclass
 class FileJob:
+    # --- Основные поля ---
     file_id: str
     original_filename: str
     file_type: FileType = FileType.UNKNOWN
@@ -53,50 +62,84 @@ class FileJob:
     history: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
-    llm_classification_type: Optional[DocumentType] = None
+    # --- Классификация (используем str для совместимости с config) ---
+    llm_classification_type: Optional[str] = None
     llm_classification_confidence: Optional[float] = None
     llm_classification_at: Optional[datetime] = None
-    user_classification_type: Optional[DocumentType] = None
+    user_classification_type: Optional[str] = None
     user_classification_requested_at: Optional[datetime] = None
     user_classification_completed_at: Optional[datetime] = None
     active_classification_source: Optional[str] = None
     classification_pending: bool = False
 
-    # Классовые константы (не поля dataclass)
-    EVENT_CHANNEL: ClassVar[str] = EVENT_CHANNEL
-    EVENT_VERSION: ClassVar[str] = EVENT_VERSION
+    # === КОНСТАНТЫ ОЧЕРЕДЕЙ И КАНАЛОВ (Единый источник) ===
     QUEUE_PREPROCESS: ClassVar[str] = "files:preprocess"
     QUEUE_OCR: ClassVar[str] = "files:ocr"
     QUEUE_LLM: ClassVar[str] = "files:llm"
     QUEUE_EXPORT: ClassVar[str] = "files:export"
+
+    # Pub/Sub каналы для уведомлений UI (не сохраняются в Redis, fire-and-forget)
+    CHANNEL_UI_LLM_REQUESTS: ClassVar[str] = "ui:llm_requests"
+    CHANNEL_UI_EXPORT_READY: ClassVar[str] = "ui:export_ready"
+    CHANNEL_UI_ERRORS: ClassVar[str] = "ui:errors"
+
+    # Реестры для итерации/мониторинга
     QUEUES: ClassVar[Dict[str, str]] = {
-        "preprocess": "files:preprocess", "ocr": "files:ocr",
-        "llm": "files:llm", "export": "files:export"
+        "preprocess": QUEUE_PREPROCESS, "ocr": QUEUE_OCR,
+        "llm": QUEUE_LLM, "export": QUEUE_EXPORT
+    }
+    UI_CHANNELS: ClassVar[Dict[str, str]] = {
+        "llm_requests": CHANNEL_UI_LLM_REQUESTS,
+        "export_ready": CHANNEL_UI_EXPORT_READY,
+        "errors": CHANNEL_UI_ERRORS,
     }
 
-    # === Методы-обёртки для 100% обратной совместимости ===
+    EVENT_CHANNEL: ClassVar[str] = EVENT_CHANNEL
+    EVENT_VERSION: ClassVar[str] = EVENT_VERSION
+
+    # === Методы-обёртки ===
     @classmethod
     def validate_payload(cls, payload: str): return _validate_payload(payload)
+
     @classmethod
     def from_payload_safe(cls, payload: str): return _from_payload_safe(payload)
+
     @classmethod
     def from_payload(cls, payload: str) -> "FileJob": return _from_payload(payload)
+
     def to_dict(self) -> Dict[str, Any]: return _to_dict(self)
+
     def to_payload(self) -> str: return json.dumps(self.to_dict(), ensure_ascii=False)
+
     @classmethod
     def get_queue_for_module(cls, module: str) -> Optional[str]: return _get_queue_for_module(module)
+
     @classmethod
     def get_all_queues(cls) -> Dict[str, str]: return _get_all_queues()
+
     @classmethod
     def is_valid_queue_module(cls, module: str) -> bool: return _is_valid_queue_module(module)
+
     @classmethod
     def detect_file_type(cls, filename: str) -> FileType: return _detect_file_type(filename)
+
     def get_allowed_modules(self) -> List[str]: return _get_allowed_modules(self.file_type)
+
     def get_base_path(self, base_dir: str = "/shared/files") -> Any: return _get_base_path(self.file_id, base_dir)
-    def get_original_path(self, base_dir: str = "/shared/files") -> Any: return _get_original_path(self.file_id, self.original_filename, base_dir)
-    def get_module_input_path(self, module: str, base_dir: str = "/shared/files") -> Any: return _get_module_input_path(self, module, base_dir)
-    def get_module_output_path(self, module: str, base_dir: str = "/shared/files") -> Any: return _get_module_output_path(self, module, base_dir)
+
+    def get_original_path(self, base_dir: str = "/shared/files") -> Any: return _get_original_path(self.file_id,
+                                                                                                   self.original_filename,
+                                                                                                   base_dir)
+
+    def get_module_input_path(self, module: str, base_dir: str = "/shared/files") -> Any: return _get_module_input_path(
+        self, module, base_dir)
+
+    def get_module_output_path(self, module: str,
+                               base_dir: str = "/shared/files") -> Any: return _get_module_output_path(self, module,
+                                                                                                       base_dir)
+
     def get_export_path(self, base_dir: str = "/shared/files") -> Any: return _get_export_path(self, base_dir)
+
     def get_archive_path(self, base_dir: str = "/shared/files") -> Any: return _get_archive_path(self, base_dir)
 
     def complete_module(self, module: str):
@@ -106,29 +149,43 @@ class FileJob:
         logger.debug(f"Модуль {module} завершён для файла {self.file_id}")
 
     def add_to_history(self, action: str, module: str, success: bool, error: str = None, duration: float = None):
-        self.history.append({"timestamp": datetime.now(timezone.utc).isoformat(), "module": module,
-                             "action": action, "success": success, "error": error, "duration_seconds": duration})
+        self.history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "module": module,
+            "action": action,
+            "success": success,
+            "error": error,
+            "duration_seconds": duration
+        })
         self.updated_at = datetime.now(timezone.utc)
 
     def is_complete(self) -> bool:
-        if self.status == FileStatus.FAILED: return True
+        if self.status == FileStatus.FAILED:
+            return True
         return all(m in self.completed_modules for m in self.get_allowed_modules())
-    def can_retry(self) -> bool: return self.retry_count < self.max_retries
+
+    def can_retry(self) -> bool:
+        return self.retry_count < self.max_retries
+
     def increment_retry(self):
         self.retry_count += 1
         self.updated_at = datetime.now(timezone.utc)
-        logger.warning(f"Попытка {self.retry_count}/{self.max_retries} для файла {self.file_id}")
 
-    def set_document_classification(self, doc_type: DocumentType, source: str = "llm", confidence: Optional[float] = None):
+    def set_document_classification(self, doc_type: str, source: str = "llm", confidence: Optional[float] = None):
         _set_classification(self, doc_type, source, confidence)
 
     @classmethod
     def build_uploaded_event(cls, *a, **k): return _build_uploaded_event(*a, **k)
+
     @classmethod
     def build_status_changed_event(cls, *a, **k): return _build_status_changed_event(*a, **k)
+
     @classmethod
     def build_processing_error_event(cls, *a, **k): return _build_processing_error_event(*a, **k)
+
     @classmethod
     def build_exported_event(cls, *a, **k): return _build_exported_event(*a, **k)
+
     @classmethod
-    def publish_event(cls, redis_client, event: Dict[str, Any]) -> int: return _publish_event(redis_client, event)
+    def publish_event(cls, redis_client, event: Dict[str, Any]) -> int:
+        return _publish_event(redis_client, event)

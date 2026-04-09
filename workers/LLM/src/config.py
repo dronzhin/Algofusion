@@ -27,6 +27,14 @@ class LLMProcessingConfig:
         "dogovor", "schet", "tovarnaya_nakladnaya", "schet_protokol", "unknown"
     ))
 
+    # === Таймауты и повторные попытки ===
+    # Сколько минут ждать пользователя, прежде чем использовать LLM-предложение
+    classification_pending_timeout_minutes: int = int(os.getenv("LLM_PENDING_TIMEOUT_MIN", "30"))
+    # Базовая задержка перед повторной проверкой (сек)
+    pending_recheck_delay_sec: int = int(os.getenv("LLM_PENDING_RECHECK_SEC", "30"))
+    # Максимальное количество циклов ожидания (защита от вечного pending)
+    max_pending_requeues: int = int(os.getenv("LLM_MAX_PENDING_REQUEUES", "20"))
+
     # === Экстракция ===
     schemas_path: str = os.getenv("LLM_SCHEMAS_PATH", "/app/workers/LLM/schemas")
     output_format: str = os.getenv("LLM_OUTPUT_FORMAT", "xml")
