@@ -180,49 +180,37 @@ services:
       - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
-      # Скрипт инициализации (опционально, можно закомментировать для ручного управления)
       - ./workers/LLM/ollama_init:/ollama_init:ro
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0}
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-3}
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
-      - OLLAMA_MODELS=${LLM_MODELS:-qwen2.5:1.5b,gemma2:2b,phi3:mini-3.8b,qwen2.5:7b,llama3.1:8b}
-      # 🔹 Авто-детект GPU: -1 = все доступные, 0 = только CPU
-      - OLLAMA_NUM_GPU=${OLLAMA_NUM_GPU:--1}
-      - OLLAMA_NUM_GPU_LAYERS=${OLLAMA_NUM_GPU_LAYERS:--1}
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_MAX_LOADED_MODELS=5
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_NUM_GPU=-1
+      - OLLAMA_MODELS=qwen2.5:1.5b,qwen2.5:7b
+    entrypoint: ["/ollama_init/entrypoint.sh"]
     networks:
       - app-network
     healthcheck:
-      # 🔹 Проверка через ollama CLI (надёжнее curl, который может отсутствовать)
-      test: ["CMD", "ollama", "list"]
+      # 🔹 Используем CMD-SHELL для надёжности
+      test: ["CMD-SHELL", "curl -fs http://localhost:11434 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      start_period: 3000s  # 🔹 КРИТИЧНО: даём 50 минут на скачивание моделей
     restart: unless-stopped
-
-    # 🔹 ВАЖНО: Не переопределяем command/entrypoint — используем дефолтные из образа
-    # Если нужна автозагрузка моделей, используйте скрипт init_models.sh с правильной логикой:
-    # 1) ollama serve & (в фоне)
-    # 2) ожидание готовности
-    # 3) ollama pull модели
-    # 4) wait $PID (возврат в форегроунд)
-
     deploy:
       resources:
         limits:
-          cpus: "${OLLAMA_CPU_LIMIT:-4}"
-          memory: "${OLLAMA_MEMORY_LIMIT:-16G}"
+          cpus: "4"
+          memory: "16G"
         reservations:
           cpus: "1"
           memory: "4G"
-          # ⚠️ GPU Reservation: раскомментируйте, если установлен NVIDIA Container Toolkit
-          # Если при запуске ошибка "could not select device driver" — закомментируйте этот блок
           devices:
-             - driver: nvidia
-               count: 1
-               capabilities: [gpu]
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # --------------------------------------------------------------------------
   # 🆕 LLM Worker - Классификация и экстракция через Ollama

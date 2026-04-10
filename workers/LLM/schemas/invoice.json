@@ -68,38 +68,5 @@
     "required": ["document_number", "document_date", "parties", "totals"],
     "additionalProperties": false
   },
-  "example": {
-    "document_type": "invoice",
-    "source_file": "schet_045.pdf",
-    "document_number": "СЧ-2024-045",
-    "document_date": "2024-03-20",
-    "parties": {
-      "supplier": {"name": "ООО \"Ромашка\"", "address": "г. Минск, ул. Ленина, 10", "tax_id": "190234567"},
-      "customer": {"name": "ООО \"Вектор\"", "address": "г. Минск, пр. Независимости, 50", "tax_id": "191234890"}
-    },
-    "contract_basis": "Договор №ДГ-2024-001",
-    "currency": "BYN",
-    "items": [
-      {
-        "description": "Консультационные услуги",
-        "unit": "час",
-        "quantity": 10,
-        "unit_price_incl_vat": 120.0,
-        "amount_no_disc_incl_vat": 1200.0,
-        "disc_amount": 0,
-        "amount_with_disc_excl_vat": 1000.0,
-        "vat_rate": 20,
-        "vat_amount": 200.0,
-        "total_incl_vat": 1200.0
-      }
-    ],
-    "totals": {
-      "vat_amount": 200.0,
-      "total_incl_vat": 1200.0,
-      "total_in_words": "Одна тысяча двести рублей 00 копеек",
-      "currency": "BYN"
-    },
-    "notes": "Оплата в течение 10 банковских дней"
-  },
   "prompt_hints": "Даты в формате ГГГГ-ММ-ДД. Суммы — числами без пробелов и валюты. НДС указывай в процентах (20, а не '20%'). Если поле не найдено — используй null."
 }

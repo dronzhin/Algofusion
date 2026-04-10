@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 
 from shared.utils.logger import setup_logger
 from shared.models.file import FileJob
+# 🔹 Импортируем DocumentType для конвертации строк в Enum
+from shared.models.file.enums import DocumentType
 from core.services.file_service import FileService
 from workers.LLM.src.config import LLMProcessingConfig
 from workers.LLM.src.llm.classifier import OllamaClassifier
@@ -94,7 +96,7 @@ class LLMProcessor:
         if not ocr_text or len(ocr_text.strip()) < 50:
             raise LLMProcessingError(f"Слишком мало текста для LLM: {len(ocr_text or '')} симв.")
 
-        logger.info(f"🎯 LLM обработка: {job.file_id} ({len(ocr_text)} симв.)")
+        logger.info(f"🎯 LLM обработка: {job.file_id} ({len(ocr_text)} симв.) {ocr_text[:500]}...")
 
         # ====================================================================
         # ЭТАП 1: Классификация документа
@@ -117,7 +119,7 @@ class LLMProcessor:
         # ЭТАП 2: Экстракция структурированных данных
         # ====================================================================
         schema_obj = get_schema_for_type(doc_type)
-        schema = schema_obj.get_json_schema() if schema_obj else {}
+        schema = schema_obj.json_schema if schema_obj else {}
 
         extracted_data = self.extractor.extract(ocr_text, schema, doc_type)
         if not extracted_data:
@@ -156,41 +158,52 @@ class LLMProcessor:
         """
         State-first обработка классификации.
         Сначала сохраняем состояние в Redis, потом публикуем уведомление.
+
+        🔹 КЛЮЧЕВОЕ: Все присваивания job.llm_classification_type используют Enum DocumentType
         """
         # 1. Приоритет: выбор пользователя
+        # 🔹 ИСПРАВЛЕНО: self.config вместо config
         if job.user_classification_type and job.user_classification_type in self.config.allowed_doc_types:
             logger.info(f"✅ Используем классификацию от пользователя: {job.user_classification_type}")
             return {
-                "type": job.user_classification_type,
+                "type": job.user_classification_type,  # str для возврата
                 "confidence": 1.0,
                 "source": "user",
                 "pending": False
             }
 
         # 2. Кэш: успешная классификация от LLM
-        if (job.llm_classification_type and
+        # 🔹 Проверяем через .value, т.к. в Redis хранится Enum
+        llm_type_value = job.llm_classification_type.value if hasattr(job.llm_classification_type,
+                                                                      'value') else job.llm_classification_type
+        # 🔹 ИСПРАВЛЕНО: self.config вместо config
+        if (llm_type_value and
                 job.llm_classification_confidence is not None and
                 job.llm_classification_confidence >= self.config.classification_threshold and
-                job.llm_classification_type in self.config.allowed_doc_types):
+                llm_type_value in self.config.allowed_doc_types):
             return {
-                "type": job.llm_classification_type,
+                "type": llm_type_value,  # str для возврата
                 "confidence": job.llm_classification_confidence,
                 "source": "llm",
                 "pending": False
             }
 
         # 3. Запуск классификатора LLM
-        doc_type, confidence = self.classifier.classify(ocr_text)
-        logger.info(f"📋 Авто-классификация LLM: {doc_type} (уверенность: {confidence:.2f})")
+        doc_type_str, confidence = self.classifier.classify(ocr_text)  # ← возвращает (str, float)
+        logger.info(f"📋 Авто-классификация LLM: {doc_type_str} (уверенность: {confidence:.2f})")
 
-        job.llm_classification_type = doc_type
+        # 🔹 КОНВЕРТАЦИЯ: строка → Enum DocumentType для корректной сериализации
+        doc_type_enum = DocumentType.safe_parse(doc_type_str) or DocumentType.UNKNOWN
+
+        # Сохраняем Enum в поле для сериализации
+        job.llm_classification_type = doc_type_enum
         job.llm_classification_confidence = confidence
         job.llm_classification_at = datetime.now(timezone.utc)
 
         # 4. Проверка порога уверенности
         if confidence >= self.config.classification_threshold:
             return {
-                "type": doc_type,
+                "type": doc_type_enum.value,  # str для возврата
                 "confidence": confidence,
                 "source": "llm",
                 "pending": False
@@ -205,8 +218,9 @@ class LLMProcessor:
             job.user_classification_requested_at = datetime.now(timezone.utc)
             job.metadata.update({
                 "classification_pending": True,
-                "llm_suggestion": doc_type,
+                "llm_suggestion": doc_type_enum.value,  # str для UI
                 "llm_confidence": confidence,
+                # 🔹 ИСПРАВЛЕНО: self.config вместо config
                 "allowed_types": list(self.config.allowed_doc_types),
             })
             # Сначала сохраняем, потом шлем уведомление
@@ -218,8 +232,9 @@ class LLMProcessor:
                     "type": "llm_classification_request",
                     "version": "1.0",
                     "file_id": job.file_id,
-                    "suggested_type": doc_type,
+                    "suggested_type": doc_type_enum.value,  # str для UI
                     "confidence": confidence,
+                    # 🔹 ИСПРАВЛЕНО: self.config вместо config
                     "allowed_types": list(self.config.allowed_doc_types),
                     "filename": job.original_filename,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -231,7 +246,7 @@ class LLMProcessor:
                 logger.error(f"⚠️ Ошибка отправки уведомления: {e}")
 
             return {
-                "type": doc_type,
+                "type": doc_type_enum.value,  # str для возврата
                 "confidence": confidence,
                 "source": "llm",
                 "pending": True
@@ -240,7 +255,7 @@ class LLMProcessor:
         # Fallback: нет Redis → продолжаем с LLM
         logger.warning("⚠️ Нет Redis, используем LLM классификацию")
         return {
-            "type": doc_type,
+            "type": doc_type_enum.value,  # str для возврата
             "confidence": confidence,
             "source": "llm",
             "pending": False
@@ -253,31 +268,89 @@ class LLMProcessor:
         try:
             self.redis.set_file_status(job.file_id, job.to_dict())
         except Exception as e:
-            logger.error(f"❌ Ошибка обновления job в Redis: {e}")
+            logger.error(f"❌ Ошибка обновления job в Redis: {e}", exc_info=True)
             raise LLMProcessingError(f"Не удалось сохранить состояние: {e}")
 
     def _read_ocr_text(self, job: FileJob, file_service: FileService) -> Optional[str]:
-        """Читает текст из OCR-результата."""
+        """Читает текст из OCR-результата с детальным логированием."""
+
+        # 🔹 1. Попытка через FileService (предпочтительный способ)
         try:
             preview = file_service.get_text_preview(job.file_id, file_type="ocr", max_lines=1000)
             if preview and len(preview.strip()) >= 50:
+                logger.debug(f"✅ OCR-текст получен через preview: {len(preview)} симв.")
+                logger.debug(f"📄 Preview (первые 300 симв.): {preview[:300]}")
                 return preview
-        except Exception:
-            pass
-
-        ocr_dir = Path(file_service.base_dir) / job.file_id / "ocr"
-        if not ocr_dir.exists():
-            return None
-
-        pages = sorted(ocr_dir.glob(f"{job.file_id}_page_*.txt"))
-        if not pages:
-            return None
-
-        try:
-            texts = [p.read_text(encoding="utf-8") for p in pages]
-            return "\n\n".join(texts)
         except Exception as e:
-            logger.error(f"❌ Ошибка чтения OCR-файлов: {e}")
+            logger.debug(f"⚠️ Ошибка получения preview: {e}")
+
+        # 🔹 2. Fallback: прямое чтение из файловой системы
+        ocr_dir = Path(file_service.base_dir) / job.file_id / "ocr"
+        logger.debug(f"🔍 Попытка прямого чтения из: {ocr_dir}")
+
+        if not ocr_dir.exists():
+            logger.warning(f"❌ Папка OCR не существует: {ocr_dir}")
+            return None
+
+        # 🔹 Логирование: что вообще есть в папке
+        try:
+            all_files = list(ocr_dir.iterdir())
+            logger.debug(f"📁 Файлов в папке: {len(all_files)}")
+            for f in all_files[:10]:  # Первые 10 файлов
+                logger.debug(f"   - {f.name} ({f.stat().st_size} байт)")
+        except Exception as e:
+            logger.debug(f"⚠️ Не удалось перечислить файлы: {e}")
+
+        # 🔹 Ищем файлы по шаблону
+        pages = sorted(ocr_dir.glob(f"{job.file_id}_page_*.txt"))
+        logger.debug(f"📄 Найдено файлов по шабону '{job.file_id}_page_*.txt': {len(pages)}")
+
+        # 🔹 Если не найдено по шаблону — пробуем найти любые .txt файлы
+        if not pages:
+            pages = sorted(ocr_dir.glob("*.txt"))
+            logger.debug(f"📄 Найдено любых .txt файлов: {len(pages)}")
+            for p in pages:
+                logger.debug(f"   - {p.name}")
+
+        if not pages:
+            logger.warning(f"❌ Не найдено текстовых файлов в {ocr_dir}")
+            return None
+
+        # 🔹 Читаем и логируем содержимое
+        try:
+            texts = []
+            for i, page_file in enumerate(pages):
+                # 🔹 Пробуем разные кодировки
+                content = None
+                for encoding in ["utf-8", "cp1251", "koi8-r", "latin-1"]:
+                    try:
+                        content = page_file.read_text(encoding=encoding)
+                        logger.debug(f"✅ {page_file.name} прочитан с кодировкой {encoding}")
+                        break
+                    except UnicodeDecodeError:
+                        continue
+
+                if content is None:
+                    logger.warning(f"⚠️ Не удалось прочитать {page_file.name} ни с одной кодировкой")
+                    continue
+
+                # 🔹 Логируем первые 200 символов каждого файла для отладки
+                logger.debug(f"📝 {page_file.name} (первые 200 симв.): {content[:200].replace(chr(10), '↵')}")
+
+                # 🔹 Фильтруем служебные файлы (если вдруг попали .json или .log)
+                if page_file.suffix == ".txt" and len(content.strip()) > 10:
+                    texts.append(content.strip())
+
+            if not texts:
+                logger.warning(f"❌ Ни один файл не удалось прочитать корректно")
+                return None
+
+            combined = "\n\n".join(texts)
+            logger.debug(f"✅ Итоговый текст: {len(combined)} симв. из {len(texts)} файлов")
+            return combined
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения OCR-файлов: {e}", exc_info=True)
             return None
 
     def _save_json_result(

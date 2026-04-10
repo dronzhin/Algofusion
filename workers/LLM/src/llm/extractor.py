@@ -87,7 +87,7 @@ class OllamaExtractor(ExtractorEngine):
     ) -> Optional[Dict[str, Any]]:
         """Извлечение структурированных данных с strict JSON Schema."""
         prompt = load_extractor_prompt(
-            text=text[:6000],
+            text=text,
             schema=schema or {},
             doc_type=doc_type,
             prompt_hints=prompt_hints

@@ -22,7 +22,7 @@ class LLMProcessingConfig:
     ollama_timeout: int = int(os.getenv("LLM_TIMEOUT", "120"))
 
     # === Параметры генерации ===
-    temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+    temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.0"))
     max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
     # 🔹 JSON MODE: всегда включён для гарантированного формата

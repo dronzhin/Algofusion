@@ -96,7 +96,7 @@ def load_extractor_prompt(
     # Подготовка данных ДО формирования строки
     hints_block = prompt_hints.strip() if prompt_hints else "Без дополнительных ограничений."
     schema_json = json.dumps(schema, ensure_ascii=False, indent=2)
-    text_preview = text[:4000]
+    text_preview = text
 
     try:
         with open(template_path, "r", encoding="utf-8") as f:
