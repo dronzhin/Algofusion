@@ -13,7 +13,15 @@ from datetime import datetime, timezone
 
 from shared.models.file import FileJob
 from shared.utils.logger import setup_logger
-from shared.utils.helpers import safe_mkdir, format_file_size, format_datetime
+from shared.utils.helpers import (
+    safe_mkdir,
+    format_file_size,
+    format_datetime,
+    get_file_fingerprint,
+    get_safe_file_path,
+    is_file_already_processed,
+    cleanup_orphaned_jobs
+)
 
 logger = setup_logger("core.services.file_service")
 
@@ -170,7 +178,7 @@ class FileService:
                     "size_bytes": stat.st_size,
                     "size_human": format_file_size(stat.st_size),
                     "created": format_datetime(datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)),
-                    "modified": format_datetime(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)),  # ← FIX: st_mtime
+                    "modified": format_datetime(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)),
                     "mime_type": self._guess_mime_type(path),
                     "is_image": path.suffix.lower() in [".png", ".jpg", ".jpeg", ".gif", ".webp"],
                     "is_text": path.suffix.lower() in [".txt", ".md", ".json", ".csv", ".xml"],
@@ -234,3 +242,70 @@ class FileService:
             ".gif": "image/gif", ".webp": "image/webp",
         }
         return mime_types.get(path.suffix.lower(), "application/octet-stream")
+
+    # ========================================================================
+    # 🔹 НОВЫЕ МЕТОДЫ ДЛЯ FINGERPRINT И ЗАЩИТЫ ОТ ДУБЛИКАТОВ
+    # ========================================================================
+
+    def get_file_fingerprint(self, file_id: str, original_filename: str) -> Optional[str]:
+        """
+        Получает fingerprint для файла по его ID и имени.
+
+        Args:
+            file_id: ID файла
+            original_filename: Оригинальное имя файла
+
+        Returns:
+            str: Fingerprint или None если файл не найден
+        """
+        file_path = get_safe_file_path(file_id, original_filename, self.base_dir)
+        if file_path:
+            return get_file_fingerprint(file_path)
+        return None
+
+    def is_duplicate_file(self, filepath: Path, redis_client: Any) -> bool:
+        """
+        Проверяет, является ли файл дубликатом уже обработанного.
+
+        Args:
+            filepath: Путь к файлу на диске
+            redis_client: Redis клиент
+
+        Returns:
+            bool: True если файл уже обрабатывается/обработан
+        """
+        return is_file_already_processed(filepath, redis_client, self.base_dir)
+
+    def save_fingerprint_to_job(self, job: "FileJob", filepath: Path) -> bool:
+        """
+        Сохраняет fingerprint файла в метаданные джоба.
+
+        Args:
+            job: Экземпляр FileJob
+            filepath: Путь к файлу для вычисления fingerprint
+
+        Returns:
+            bool: True если успешно
+        """
+        fingerprint = get_file_fingerprint(filepath)
+        if fingerprint:
+            job.metadata["file_fingerprint"] = fingerprint
+            return True
+        return False
+
+    def cleanup_orphaned_jobs(self, redis_client: Any, min_age_hours: int = 1) -> Dict[str, int]:
+        """
+        Обёртка над cleanup_orphaned_jobs из helpers.
+
+        Args:
+            redis_client: Redis клиент
+            min_age_hours: Минимальный возраст джоба для очистки
+
+        Returns:
+            Dict со статистикой очистки
+        """
+        return cleanup_orphaned_jobs(
+            redis_client=redis_client,
+            base_dir=self.base_dir,
+            min_age_hours=min_age_hours
+        )

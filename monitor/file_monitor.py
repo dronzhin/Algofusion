@@ -1,7 +1,8 @@
 # monitor/file_monitor.py
 """
 Мониторинг внешней папки для новых файлов.
-Запускается как отдельный контейнер.
+🔹 Паттерн Consume-on-Read + Content-Based Fingerprint
+🔹 Дубликаты: только лог в UI, никаких других эффектов.
 """
 
 import time
@@ -9,13 +10,20 @@ import shutil
 import uuid
 import os
 from pathlib import Path
-from typing import Set, Optional
-from datetime import datetime, timezone  # ← FIX: Добавили timezone
+from typing import Optional
+from datetime import datetime, timezone
 
 from shared.models.file import FileJob, FileStatus
+from shared.models.file.enums import FileType
 from shared.config.settings import get_settings
 from shared.utils.logger import setup_logger
-from shared.utils.helpers import safe_mkdir
+from shared.utils.helpers import (
+    safe_mkdir,
+    get_file_fingerprint,
+    is_file_already_processed_by_fingerprint,
+    update_fingerprint_index,
+    FILE_FINGERPRINT_INDEX
+)
 from core.services.redis_client import get_redis_client
 
 logger = setup_logger("monitor.file_monitor")
@@ -24,10 +32,8 @@ logger = setup_logger("monitor.file_monitor")
 class FileMonitor:
     """Мониторит внешнюю папку и создаёт задания для новых файлов."""
 
-    # Минимальный размер файла, чтобы считать его "готовым" (защита от копирования)
     MIN_FILE_SIZE = 1024  # 1 KB
-    # Время стабильности файла (сек) — файл не менялся, значит готов к обработке
-    FILE_STABLE_TIME = 2
+    FILE_STABLE_TIME = 2  # секунды стабильности файла
 
     def __init__(
             self,
@@ -40,7 +46,6 @@ class FileMonitor:
         self.external_path = Path(external_path or settings.external_monitor_path)
         self.shared_path = Path(shared_path or settings.shared_files_path)
         self.check_interval = check_interval or settings.monitor_interval
-        self.processed_files: Set[str] = set()
         self.redis = get_redis_client()
 
         self._file_cache: dict[str, tuple[float, float, int]] = {}
@@ -63,6 +68,8 @@ class FileMonitor:
         safe_mkdir(self.external_path, mode=0o755)
         safe_mkdir(self.shared_path, mode=0o755)
 
+        self._rebuild_fingerprint_index()
+
         iteration = 0
         while True:
             iteration += 1
@@ -70,7 +77,6 @@ class FileMonitor:
 
             try:
                 self.check_for_new_files()
-                logger.debug(f"💤 Сплю {self.check_interval}сек...")
                 time.sleep(self.check_interval)
             except KeyboardInterrupt:
                 logger.info("Мониторинг остановлен пользователем")
@@ -78,242 +84,206 @@ class FileMonitor:
             except Exception as e:
                 logger.error(f"Ошибка в цикле: {e}", exc_info=True)
                 time.sleep(self.check_interval)
-    def _check_permissions(self) -> bool:
-        """
-        Проверка прав доступа к мониторинговым папкам.
-        Возвращает True если все права в порядке.
-        """
-        errors = []
 
-        # Проверка внешней папки (чтение + выполнение для входа)
+    def _check_permissions(self) -> bool:
+        errors = []
         if not os.access(self.external_path, os.R_OK | os.X_OK):
             errors.append(f"Нет прав на чтение/вход в {self.external_path}")
-
-        # Проверка shared-папки (запись + выполнение)
         if not os.access(self.shared_path, os.W_OK | os.X_OK):
             errors.append(f"Нет прав на запись/вход в {self.shared_path}")
 
         if errors:
             for err in errors:
                 logger.error(f"❌ {err}")
-            logger.error(
-                f"💡 Исправление: "
-                f"sudo chown -R $USER:$USER {self.external_path} {self.shared_path} && "
-                f"sudo chmod -R 755 {self.external_path} {self.shared_path}"
-            )
             return False
-
-        logger.debug("✓ Права доступа проверены")
         return True
 
     def _is_file_ready(self, file_path: Path) -> bool:
-        """
-        Проверка что файл "готов" к обработке:
-        - Размер > минимального
-        - Не менялся последние FILE_STABLE_TIME секунд
-        - Не заблокирован другим процессом
-        """
         try:
             stat = file_path.stat()
-
-            # Проверка минимального размера
             if stat.st_size < self.MIN_FILE_SIZE:
-                logger.debug(f"  ❌ {file_path.name}: размер {stat.st_size} < {self.MIN_FILE_SIZE}")
                 return False
 
             current_time = time.time()
-            file_mtime = stat.st_mtime  # ← Время модификации файла
+            file_mtime = stat.st_mtime
             file_size = stat.st_size
-
-            # ← FIX: Используем строковый путь для надёжности
             cache_key = str(file_path)
 
             if cache_key in self._file_cache:
                 first_seen_time, cached_mtime, cached_size = self._file_cache[cache_key]
-
-                # Если размер или mtime файла изменились — файл ещё пишется
                 if file_mtime != cached_mtime or file_size != cached_size:
-                    logger.debug(f"  🔄 {file_path.name}: файл изменился, сброс кэша")
-                    # ← FIX: Обновляем время первого наблюдения
                     self._file_cache[cache_key] = (current_time, file_mtime, file_size)
                     return False
 
-                # ← FIX: Сравниваем с ВРЕМЕНЕМ ПЕРВОГО НАБЛЮДЕНИЯ, а не mtime файла!
-                time_since_first_seen = current_time - first_seen_time
-
-                logger.debug(
-                    f"  ⏱ {file_path.name}: наблюдается {time_since_first_seen:.1f}сек (нужно {self.FILE_STABLE_TIME}сек)")
-
-                if time_since_first_seen >= self.FILE_STABLE_TIME:
-                    logger.debug(f"  ✅ {file_path.name}: ГОТОВ к обработке!")
+                if current_time - first_seen_time >= self.FILE_STABLE_TIME:
                     del self._file_cache[cache_key]
                     return True
-                else:
-                    return False
+                return False
             else:
-                # ← FIX: Сохраняем (время_наблюдения, mtime_файла, размер_файла)
-                logger.debug(f"  📝 {file_path.name}: первое наблюдение, добавляем в кэш")
                 self._file_cache[cache_key] = (current_time, file_mtime, file_size)
                 return False
-
-        except (PermissionError, FileNotFoundError) as e:
-            logger.debug(f"  ⚠ {file_path.name}: недоступен ({e})")
-            return False
         except Exception as e:
-            logger.warning(f"Ошибка проверки готовности файла {file_path}: {e}")
+            logger.debug(f"Ошибка проверки готовности {file_path.name}: {e}")
             return False
 
     def check_for_new_files(self):
         """Проверка новых файлов во внешней папке."""
-        logger.debug("🔍 check_for_new_files: НАЧАЛО")
-
         if not self.external_path.exists():
-            logger.warning(f"Внешняя папка не существует: {self.external_path}")
             return
 
-        logger.debug(f"📂 Сканируем: {self.external_path}")
+        if len(self._file_cache) > 500:
+            self._file_cache = dict(list(self._file_cache.items())[-500:])
 
-        files_count = 0
         for item in self.external_path.iterdir():
-            files_count += 1
-            logger.debug(f"  [{files_count}] {item.name} (file={item.is_file()})")
+            if not item.is_file() or item.name.startswith('.'):
+                continue
 
-            if item.is_file() and not item.name.startswith('.'):
-                logger.debug(f"    → Проверяем готовность: {item.name}")
+            if not self._is_file_ready(item):
+                continue
 
-                if not self._is_file_ready(item):
-                    logger.debug(f"    → Файл не готов, пропускаем")
-                    continue
+            # 🔹 1. Вычисляем fingerprint ДО любых действий
+            source_fp = get_file_fingerprint(item, use_content=True)
 
-                logger.debug(f"    → Файл готов! Обрабатываем...")
+            # 🔹 2. Проверяем Redis на наличие такого же файла
+            if source_fp and is_file_already_processed_by_fingerprint(source_fp, self.redis):
+                logger.info(f"✅ Дубликат обнаружен (fp: {source_fp}), пропускаем: {item.name}")
 
-                file_stat = item.stat()
-                cache_key = f"{item.name}:{file_stat.st_mtime}:{file_stat.st_size}"
+                # 🔹 ПУБЛИКУЕМ СОБЫТИЕ ТОЛЬКО ДЛЯ ЛОГОВ
+                # Этот тип события UI обработает как "только в журнал, никаких других действий"
+                self.redis.publish_event("files:events", {
+                    "type": "log_only",
+                    "log_level": "WARNING",
+                    "log_msg": f"🗑️ Дубликат удалён: {item.name}",
+                    "filename": item.name,
+                    "fingerprint": source_fp,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ui_action": "none"
+                })
 
-                if cache_key not in self.processed_files:
-                    logger.info(f"Обнаружен новый файл: {item.name} ({file_stat.st_size} байт)")
-                    file_id = str(uuid.uuid4())[:8]
-                    success = self.process_new_file(item, file_id)
+                # Физическое удаление файла
+                try:
+                    item.unlink()
+                    logger.info(f"🗑️ Исходный файл-дубликат удалён: {item.name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось удалить дубликат {item.name}: {e}")
+                continue
 
-                    if success:
-                        self.processed_files.add(cache_key)
-                        if len(self.processed_files) > 1000:
-                            self.processed_files = set(list(self.processed_files)[-1000:])
-                    else:
-                        logger.warning(f"Не удалось обработать файл {item.name}")
-                else:
-                    logger.debug(f"    → Файл уже обработан (в кэше)")
+            # 🔹 3. Файл новый → обрабатываем
+            file_id = str(uuid.uuid4())[:8]
+            success = self.process_new_file(item, file_id, source_fp)
 
-        logger.debug(f"✅ check_for_new_files: ЗАВЕРШЕНО (файлов: {files_count})")
+            if not success:
+                logger.warning(f"⏸️ Файл {item.name} не обработан, останется во входящей папке")
 
-    def process_new_file(self, file_path: Path, file_id: str) -> bool:
-        """
-        Обработка нового файла: создание структуры и отправка в очередь.
-
-        Returns:
-            True если обработка успешна, False если произошла ошибка
-        """
+    def process_new_file(self, source_path: Path, file_id: str, precomputed_fingerprint: Optional[str] = None) -> bool:
         try:
-            # ← FIX: Создаём структуру с явными правами
             base_dir = self.shared_path / file_id
             original_dir = base_dir / "original"
-            safe_mkdir(original_dir, mode=0o755)
+            dest_path = original_dir / source_path.name
 
-            # Копируем файл с сохранением метаданных
-            dest_path = original_dir / file_path.name
-
-            # Проверка что файл ещё доступен перед копированием
-            if not file_path.exists():
-                logger.warning(f"Файл исчез перед копированием: {file_path}")
+            if base_dir.exists():
+                logger.warning(f"⚠️ Директория {file_id} уже существует. Пропускаем.")
+                if dest_path.exists() and source_path.exists():
+                    source_path.unlink()
                 return False
 
-            shutil.copy2(file_path, dest_path)
+            safe_mkdir(original_dir, mode=0o755)
+            shutil.copy2(source_path, dest_path)
 
-            # Явно устанавливаем права на скопированный файл
-            try:
-                os.chmod(dest_path, 0o644)  # Чтение для всех, запись для владельца
-            except PermissionError:
-                logger.warning(f"Не удалось установить права на {dest_path}")
+            if not dest_path.exists():
+                raise RuntimeError("Копия не создана")
 
-            logger.info(f"Файл скопирован: {file_path} → {dest_path}")
+            src_stat = source_path.stat()
+            dst_stat = dest_path.stat()
+            if dst_stat.st_size != src_stat.st_size:
+                raise RuntimeError(f"Несоответствие размеров: исходный {src_stat.st_size} != копия {dst_stat.st_size}")
 
-            # Создаём FileJob
-            file_type = FileJob.detect_file_type(file_path.name)
-            file_size = file_path.stat().st_size
+            source_path.unlink()
+            logger.info(f"✅ Исходный файл потреблён и удалён: {source_path.name}")
+
+            fingerprint = precomputed_fingerprint or get_file_fingerprint(dest_path, use_content=True)
+
+            ext = source_path.suffix.lower()
+            type_map = {
+                ".pdf": FileType.PDF,
+                ".doc": FileType.DOCUMENT, ".docx": FileType.DOCUMENT,
+                ".png": FileType.IMAGE, ".jpg": FileType.IMAGE, ".jpeg": FileType.IMAGE,
+                ".txt": FileType.TEXT, ".csv": FileType.TEXT, ".json": FileType.TEXT
+            }
+            file_type = type_map.get(ext, FileType.UNKNOWN)
 
             job = FileJob(
                 file_id=file_id,
-                original_filename=file_path.name,
+                original_filename=source_path.name,
                 file_type=file_type,
-                file_size=file_size,
+                file_size=src_stat.st_size,
                 status=FileStatus.UPLOADED,
                 current_module="preprocess",
                 export_to_1c=True,
+                metadata={
+                    "file_fingerprint": fingerprint,
+                    "source_consumed_at": datetime.now(timezone.utc).isoformat()
+                } if fingerprint else {},
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
 
-            # Сохраняем статус в Redis
             self.redis.set_file_status(file_id, job.to_dict())
+            if fingerprint:
+                update_fingerprint_index(self.redis, file_id, fingerprint)
 
-            # Отправляем в очередь preprocess
             self.redis.push_to_queue("files:preprocess", job.to_payload(), priority=job.priority)
 
-            # Публикуем событие для UI
             self.redis.publish_event("files:events", {
                 "type": "file_uploaded",
                 "file_id": file_id,
-                "filename": file_path.name,
-                "status": job.status.value,
+                "filename": source_path.name,
+                "status": FileStatus.UPLOADED.value,
                 "file_type": file_type.value,
-                "file_size": file_size,
+                "file_size": src_stat.st_size,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
 
-            logger.info(f"Файл {file_id} добавлен в очередь обработки")
+            logger.info(f"✅ Файл {file_id} успешно добавлен в пайплайн (fp: {fingerprint})")
             return True
 
-        except PermissionError as e:
-            logger.error(f"❌ Ошибка прав доступа при обработке {file_path}: {e}")
-            logger.error(f"💡 Проверьте права: ls -la {file_path.parent}")
-            self._publish_error_event(file_path.name, f"PermissionError: {e}")
-            return False
-
-        except shutil.Error as e:
-            logger.error(f"❌ Ошибка копирования {file_path}: {e}")
-            self._publish_error_event(file_path.name, f"CopyError: {e}")
-            return False
-
         except Exception as e:
-            logger.error(f"❌ Ошибка обработки файла {file_path}: {e}", exc_info=True)
-            self._publish_error_event(file_path.name, str(e))
+            logger.error(f"❌ Ошибка обработки {source_path.name}: {e}", exc_info=True)
+            self._publish_error_event(source_path.name, str(e))
             return False
 
     def _publish_error_event(self, filename: str, error: str):
-        """Публикация события об ошибке для UI."""
         try:
             self.redis.publish_event("files:events", {
-                "type": "file_error",
-                "filename": filename,
-                "error": error,
+                "type": "file_error", "filename": filename, "error": error,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         except Exception as e:
-            logger.error(f"Не удалось опубликовать событие об ошибке: {e}")
+            logger.error(f"Не удалось опубликовать событие: {e}")
 
-    def cleanup_cache(self):
-        """Очистка кэша обработанных файлов (для предотвращения утечек памяти)."""
-        # Оставляем только последние 500 записей
-        if len(self.processed_files) > 500:
-            old_count = len(self.processed_files)
-            self.processed_files = set(list(self.processed_files)[-500:])
-            logger.debug(f"Кэш обработанных файлов очищен: {old_count} → {len(self.processed_files)}")
+    def _rebuild_fingerprint_index(self):
+        logger.info("🔍 Восстановление индексов fingerprint...")
+        try:
+            all_files = self.redis.get_all_files()
+            rebuilt = 0
+            for file_data in all_files:
+                fp = file_data.get("metadata", {}).get("file_fingerprint")
+                fid = file_data.get("file_id")
+                if fp and fid:
+                    existing = self.redis.get(FILE_FINGERPRINT_INDEX.format(fingerprint=fp))
+                    if not existing or existing != fid:
+                        update_fingerprint_index(self.redis, fid, fp)
+                        rebuilt += 1
+            if rebuilt:
+                logger.info(f"✅ Восстановлено {rebuilt} индексов fingerprint")
+            else:
+                logger.debug("✅ Все индексы в порядке")
+        except Exception as e:
+            logger.error(f"❌ Ошибка восстановления индексов: {e}")
 
 
 def main():
-    """Точка входа для контейнера monitor."""
     logger.info("Запуск FileMonitor...")
-
     try:
         monitor = FileMonitor()
         monitor.start()

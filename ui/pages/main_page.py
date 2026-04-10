@@ -6,7 +6,6 @@
 
 # Standard library
 from datetime import datetime, timezone
-from typing import Optional, Callable
 
 # Third-party
 import streamlit as st
@@ -17,7 +16,7 @@ from shared.utils.logger import setup_logger
 from shared.config.settings import get_settings
 
 # UI state & cache
-from ui.state import SessionState, get_session_state
+from ui.state import SessionState
 from ui.cache import get_files_from_redis_cached, get_file_stats_cached
 
 # Components (только публичные функции!)

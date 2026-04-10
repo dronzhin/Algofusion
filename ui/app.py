@@ -1,6 +1,7 @@
 # ui/app.py
 """
 Точка входа UI приложения Algofusion File Processor.
+🔹 Автоматически запускает валидацию и очистку мёртвых записей при старте.
 """
 
 import sys
@@ -34,7 +35,7 @@ st.set_page_config(
 from shared.utils.logger import setup_logger
 from shared.config.settings import get_settings
 from ui.state import get_session_state
-from ui.cache import get_redis_client_cached
+from ui.cache import get_redis_client_cached, run_startup_validation
 from ui.pages.main_page import render_main_page
 
 logger = setup_logger("ui.app")
@@ -45,17 +46,14 @@ logger = setup_logger("ui.app")
 # ============================================================================
 
 def main():
-    """Основная функция приложения."""
     logger.info("🚀 Приложение запущено")
 
-    # Скрыть стандартную навигацию Streamlit
     from ui.utils.ui_hacks import hide_streamlit_navigation
     hide_streamlit_navigation()
 
-    # Инициализация состояния
     session = get_session_state()
 
-    # Инициализация сервисов (только если ещё не созданы)
+    # Инициализация сервисов
     if session.redis_client is None:
         session.redis_client = get_redis_client_cached()
 
@@ -67,13 +65,23 @@ def main():
         session.file_service = FileService(session.settings.shared_files_path)
 
     # ========================================================================
+    # 🔹 ОДНОРАЗОВАЯ ВАЛИДАЦИЯ ПРИ СТАРТЕ (кэшируется, не гоняется при rerun)
+    # ========================================================================
+    if not getattr(session, "_startup_validation_done", False):
+        logger.info("⏳ Запуск проверки целостности файлов...")
+        result = run_startup_validation(session.redis_client, session.file_service)
+        session._startup_validation_done = True
+
+        if result["cleaned"] > 0:
+            st.toast(f"🧹 Удалено {result['cleaned']} мёртвых записей", icon="🗑️")
+            logger.info(f"🧹 Стартовая очистка: удалено {result['cleaned']} записей")
+        else:
+            logger.debug("✅ Все записи в Redis соответствуют файлам на диске")
+
+    # ========================================================================
     # 🔹 ОБРАБОТКА СОБЫТИЙ И РЕНДЕРИНГ
     # ========================================================================
 
-    # Обработка событий Redis теперь происходит внутри render_main_page()
-    # через вызов session.process_events() — не дублируем здесь!
-
-    # Рендеринг страницы
     try:
         if session.current_page == "main":
             render_main_page(session)

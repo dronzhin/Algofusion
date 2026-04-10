@@ -6,8 +6,10 @@
 
 import streamlit as st
 from typing import Any, List, Dict, Optional, Callable, Literal
+from pathlib import Path
 
 from shared.utils.logger import setup_logger
+from shared.utils.helpers import get_safe_file_path
 from ui.utils.constants import UI_CONFIG, FILE_STATUS_CONFIG, MODULES_ORDER
 from ui.utils.formatters import (
     format_datetime_short,
@@ -20,21 +22,20 @@ from ui.utils.components import error_handler, render_columns_config, render_act
 
 logger = setup_logger("ui.components.file_list")
 
+# Базовая директория для валидации
+BASE_FILES_DIR = Path("/shared/files")
+
 
 def render_file_list(
         files: List[Dict[str, Any]],
         session_state: Any,
         mode: Literal["table", "cards"] = "table",
         on_detail: Optional[Callable[[str], None]] = None,
-        on_retry: Optional[Callable[[str], None]] = None,
-        on_delete: Optional[Callable[[str], None]] = None,
-        on_download_preprocessed: Optional[Callable[[str], None]] = None,
         on_edit: Optional[Callable[[str], None]] = None,
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Рендерит список файлов в выбранном режиме."""
     with error_handler("file_list", "Ошибка отображения списка файлов"):
-        # 🔹 Получаем file_service из session (единый источник)
         file_service = getattr(session_state, "file_service", None)
 
         if not files:
@@ -44,17 +45,9 @@ def render_file_list(
         if mode == "table":
             _render_table_mode(files, session_state, on_detail)
         else:
-            # 🔹 Прокидываем колбэки в режим карточек
             _render_cards_mode(
-                files,
-                session_state,
-                file_service,
-                on_detail,
-                on_retry,
-                on_delete,
-                on_download_preprocessed,
-                on_edit,
-                on_export
+                files, file_service,
+                on_edit, on_export
             )
 
 
@@ -104,12 +97,7 @@ def _render_table_row(
 
 def _render_cards_mode(
         files: List[Dict[str, Any]],
-        session_state: Any,
         file_service: Optional[Any],
-        on_detail: Optional[Callable[[str], None]],
-        on_retry: Optional[Callable[[str], None]],
-        on_delete: Optional[Callable[[str], None]],
-        on_download_preprocessed: Optional[Callable[[str], None]] = None,
         on_edit: Optional[Callable[[str], None]] = None,
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
@@ -118,34 +106,19 @@ def _render_cards_mode(
 
     for idx, file in enumerate(files):
         _render_file_card(
-            file,
-            idx,
-            session_state,
-            file_service,
-            on_detail,
-            on_retry,
-            on_delete,
-            on_download_preprocessed,
-            on_edit,
-            on_export
+            file, idx, file_service,
+            on_edit, on_export
         )
 
 
 def _render_file_card(
         file: Dict[str, Any],
         idx: int,
-        session_state: Any,
         file_service: Optional[Any],
-        on_detail: Optional[Callable[[str], None]] = None,
-        on_retry: Optional[Callable[[str], None]] = None,
-        on_delete: Optional[Callable[[str], None]] = None,
-        on_download_preprocessed: Optional[Callable[[str], None]] = None,
         on_edit: Optional[Callable[[str], None]] = None,
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
-    """
-    Компактная карточка файла с отображением прогресса по всем модулям.
-    """
+    """Компактная карточка файла с отображением прогресса по всем модулям."""
     file_id = file.get("file_id", f"file_{idx}")
     filename = file.get("original_filename", "unknown")
     file_size = file.get("file_size", 0)
@@ -153,19 +126,19 @@ def _render_file_card(
     created_at = format_datetime_short(file.get("created_at"))
     size_formatted = format_file_size(file_size)
 
-    # 🔹 Иконка статуса для заголовка
+    # Иконка статуса для заголовка
     status_icon = {
         "uploaded": "📁", "processing": "⏳", "completed": "✅",
         "exported": "📤", "failed": "❌"
     }.get(status, "❓")
 
-    # 🔹 Цвет бейджа статуса
+    # Цвет бейджа статуса
     status_config = FILE_STATUS_CONFIG.get(status, FILE_STATUS_CONFIG["uploaded"])
     status_label = status_config["label"]
     status_color = status_config["color"]
     status_bg = status_config["bg"]
 
-    # 🔹 Заголовок: название слева, статус справа
+    # Заголовок: название слева, статус справа
     header_left, header_right = st.columns([4, 1], gap="small")
 
     with header_left:
@@ -188,6 +161,10 @@ def _render_file_card(
         """
         st.markdown(badge_html, unsafe_allow_html=True)
 
+    # 🔹 Проверяем существование файла на диске
+    file_path = get_safe_file_path(file_id, filename, BASE_FILES_DIR)
+    file_exists = file_path is not None and file_path.exists()
+
     # 🔹 Expander с контентом
     with st.expander("📊 Детали", expanded=False):
         # Информация о файле
@@ -202,9 +179,7 @@ def _render_file_card(
             st.caption("📦 Размер")
             st.write(f"`{size_formatted}`")
 
-        # ====================================================================
-        # 🔹 ПРОГРЕСС ПО МОДУЛЯМ (Централизованный рендеринг)
-        # ====================================================================
+        # Прогресс по модулям
         st.markdown("##### 🔄 Прогресс обработки")
 
         completed_modules = set(file.get("completed_modules", []))
@@ -219,21 +194,15 @@ def _render_file_card(
                 return "processing"
             return "pending"
 
-        # 🔹 Создаём колонки для бейджей модулей (строго по порядку из MODULES_ORDER)
         module_cols = st.columns(len(MODULES_ORDER), gap="small")
-
         for i, module_name in enumerate(MODULES_ORDER):
             mod_status = get_module_status(module_name)
             with module_cols[i]:
                 render_module_badge_safe(
-                    module=module_name,
-                    status=mod_status,
-                    container=module_cols[i],
-                    size="small",
-                    show_tooltip=True
+                    module=module_name, status=mod_status,
+                    container=module_cols[i], size="small", show_tooltip=True
                 )
 
-        # 🔹 Подсказка о текущем этапе
         if status == "processing" and current_module:
             st.caption(f"⏳ Сейчас: {current_module}")
         elif status == "completed":
@@ -249,45 +218,38 @@ def _render_file_card(
 
         st.divider()
 
-        # ====================================================================
         st.markdown("##### ⚙️ Действия")
 
         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4, gap="small")
 
         # Кнопка 1: Скачать оригинал
         with btn_col1:
-            if file_service:
+            if file_service and file_exists:
                 original_path = file_service.get_download_path(file_id, "original")
                 if original_path and original_path.exists():
                     with open(original_path, "rb") as f:
                         st.download_button(
-                            label="📥 Оригинал",
-                            data=f.read(),
-                            file_name=filename,
-                            mime="application/octet-stream",
-                            key=f"dl_orig_{idx}",
-                            use_container_width=True,
-                            help="Скачать исходный файл"
+                            label="📥 Оригинал", data=f.read(), file_name=filename,
+                            mime="application/octet-stream", key=f"dl_orig_{idx}",
+                            use_container_width=True, help="Скачать исходный файл"
                         )
                 else:
                     st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
             else:
-                st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
+                disabled_help = "Файл не найден на диске" if not file_exists else "FileService не доступен"
+                st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True, help=disabled_help)
 
         # Кнопка 2: Скачать результат предобработки
         with btn_col2:
             preprocess_status = get_module_status("preprocess")
-            if preprocess_status == "completed" and file_service:
+            if preprocess_status == "completed" and file_service and file_exists:
                 preprocessed_path = file_service.get_download_path(file_id, "preprocessed")
                 if preprocessed_path and preprocessed_path.exists():
                     with open(preprocessed_path, "rb") as f:
                         st.download_button(
-                            label="📥 Результат",
-                            data=f.read(),
-                            file_name=f"{filename}_processed.png",
-                            mime="image/png",
-                            key=f"dl_prep_{idx}",
-                            use_container_width=True,
+                            label="📥 Результат", data=f.read(),
+                            file_name=f"{filename}_processed.png", mime="image/png",
+                            key=f"dl_prep_{idx}", use_container_width=True,
                             help="Скачать обработанный файл"
                         )
                 else:
@@ -298,6 +260,8 @@ def _render_file_card(
                     "processing": "Обработка в процессе...",
                     "failed": "Ошибка обработки",
                 }.get(preprocess_status, "Недоступно")
+                if not file_exists:
+                    btn_help = "Файл не найден на диске"
                 st.button("📥 Результат", key=f"dl_prep_{idx}", disabled=True, use_container_width=True, help=btn_help)
 
         # Кнопка 3: Редактировать
@@ -312,28 +276,47 @@ def _render_file_card(
         with btn_col4:
             if on_export:
                 all_completed = all(get_module_status(m) == "completed" for m in ["preprocess", "ocr", "llm"])
-                export_disabled = not all_completed or status not in ("completed", "exported")
+                export_disabled = not all_completed or status not in ("completed", "exported") or not file_exists
 
                 export_label = "📤 Экспорт"
                 if status == "exported":
                     export_label = "✅ Экспортировано"
 
-                if st.button(
-                        export_label,
-                        key=f"export_{idx}",
-                        use_container_width=True,
-                        disabled=export_disabled,
-                        help="Экспортировать в 1С" if not export_disabled else "Завершите все этапы обработки"
-                ):
+                export_help = "Экспортировать в 1С"
+                if not file_exists:
+                    export_help = "Файл не найден на диске"
+                elif not all_completed:
+                    export_help = "Завершите все этапы обработки"
+
+                if st.button(export_label, key=f"export_{idx}", use_container_width=True,
+                            disabled=export_disabled, help=export_help):
                     on_export(file_id)
             else:
                 st.button("📤 Экспорт", key=f"export_{idx}", disabled=True, use_container_width=True)
+
+        # 🔹 Предупреждение, если файл не найден на диске (но показываем в списке как активный)
+        if not file_exists and status in ("uploaded", "processing"):
+            st.warning(
+                f"⚠️ Файл `{filename}` временно недоступен на диске.\n"
+                f"Возможно, он обрабатывается другим процессом."
+            )
+        elif not file_exists and status not in ("uploaded", "processing"):
+            st.error(
+                f"❌ Файл `{filename}` не найден на диске.\n"
+                f"Возможные причины: файл удалён вручную, ошибка монтирования томов."
+            )
+            with st.expander("🔧 Технические детали", expanded=False):
+                st.json({
+                    "file_id": file_id,
+                    "status": status,
+                    "expected_path": str(get_safe_file_path(file_id, filename, BASE_FILES_DIR)),
+                    "metadata": file.get("metadata", {})
+                })
 
 
 def _default_navigate_to_detail(file_id: str, session_state: Any) -> None:
     """Дефолтная навигация (если callback не передан)."""
     redis_client = getattr(session_state, "redis_client", None)
-
     if redis_client:
         try:
             from ui.utils.redis_helpers import safe_get_all_files

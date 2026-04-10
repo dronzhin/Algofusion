@@ -18,7 +18,7 @@ services:
       - redis_data:/data
     networks:
       - app-network
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --appendfsync everysec
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
