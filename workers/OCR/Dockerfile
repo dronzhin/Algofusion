@@ -75,15 +75,4 @@ COPY core/services/file_service.py ./core/services/file_service.py
 COPY workers/OCR/worker.py ./workers/OCR/worker.py
 COPY workers/OCR/src/ ./workers/OCR/src/
 
-# 🔹 Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c " \
-from core.services.redis_client import get_redis_client; \
-from workers.OCR.src.ocr.tesseract import TesseractEngine; \
-from workers.OCR.src.ocr.easyocr import EasyOCREngine; \
-from workers.OCR.src.ocr.surya import SuryaEngine; \
-from workers.OCR.src.ocr.glm import GLMEngine; \
-get_redis_client().client.ping(); \
-print('✅ All OCR engines available')" || exit 1
-
 CMD ["python", "workers/OCR/worker.py"]
