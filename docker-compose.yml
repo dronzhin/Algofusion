@@ -179,34 +179,25 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_models:/root/.ollama
-      - ./workers/LLM/ollama_init:/ollama_init:ro
+      - ollama_models:/root/.ollama  # 🔹 Модели сохраняются между перезапусками
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_MAX_LOADED_MODELS=5
-      - OLLAMA_NUM_PARALLEL=2
       - OLLAMA_NUM_GPU=-1
-      - OLLAMA_MODELS=qwen2.5:1.5b,qwen2.5:7b
-    entrypoint: ["/ollama_init/entrypoint.sh"]
     networks:
       - app-network
     healthcheck:
-      # 🔹 Используем CMD-SHELL для надёжности
-      test: ["CMD-SHELL", "curl -fs http://localhost:11434 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 3000s  # 🔹 КРИТИЧНО: даём 50 минут на скачивание моделей
-    restart: unless-stopped
+      test: ["CMD-SHELL", "curl -fs http://localhost:11434/api/version || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
           cpus: "4"
           memory: "16G"
         reservations:
-          cpus: "1"
-          memory: "4G"
           devices:
             - driver: nvidia
               count: 1
