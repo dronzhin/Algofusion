@@ -179,19 +179,23 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_models:/root/.ollama  # 🔹 Модели сохраняются между перезапусками
+      - ollama_models:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_NUM_GPU=-1
     networks:
       - app-network
+
+    # 🔹 Надёжный healthcheck через встроенный CLI
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:11434/api/version || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # 🔹 Важно: время на инициализацию CUDA
+
+    restart: unless-stopped
     deploy:
       resources:
         limits:
