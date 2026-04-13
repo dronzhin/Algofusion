@@ -55,18 +55,21 @@ EOF
 
 # 🔹 Опционально: предзагрузить другие тяжёлые модели (раскомментируйте при необходимости)
 RUN python << 'EOF'
+from surya.foundation import FoundationPredictor
 from surya.detection import DetectionPredictor
 from surya.recognition import RecognitionPredictor
+
+# Initialize foundation predictor first (shared backbone)
+foundation_predictor = FoundationPredictor()
+
+# Detection predictor can still be initialized independently
 DetectionPredictor()
-RecognitionPredictor()
+
+# Recognition predictor now requires foundation_predictor
+RecognitionPredictor(foundation_predictor)
+
 print('✅ Surya модели предзагружены')
 EOF
-
-# === Проверка установки ===
-RUN python -c "import pytesseract; print('✅ Tesseract OK')" && \
-    python -c "import easyocr; print('✅ EasyOCR OK')" && \
-    python -c "import surya; print('✅ Surya OK')" && \
-    python -c "from transformers import AutoModelForImageTextToText; print('✅ Transformers OK')"
 
 # === Копирование кода ===
 COPY shared/ ./shared/
