@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # workers/LLM/worker.py
 """
-Worker для LLM-обработки.
-Слушает очередь Redis и выполняет пайплайн с поддержкой pending-статуса.
+Worker для LLM-обработки с поддержкой мгновенного обновления настроек.
+Слушает очередь Redis и канал конфигурации.
 """
 
 import sys
 import time
+import json
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
-# Добавляем корень проекта для импортов
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -28,33 +28,104 @@ logger = setup_logger("workers.llm.worker")
 
 
 class LLMWorker:
-    """Worker для LLM-обработки из очереди Redis."""
+    """Worker для LLM-обработки с live-reload настроек."""
+
+    # 🔹 Канал для получения обновлений конфигурации
+    CONFIG_CHANNEL = "config:llm:updates"
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
         self.redis = get_redis_client()
         self.file_service = FileService(base_dir=self.settings.shared_files_path)
 
-        # 🔹 Сохраняем конфиг как атрибут класса
+        # 🔹 Инициализация конфига
         self.config = LLMProcessingConfig()
-
         self.processor = LLMProcessor(config=self.config, redis_client=self.redis)
 
         self.queues = [FileJob.get_queue_for_module("llm")]
-        # Ключ для отложенных задач в Redis (Sorted Set)
         self.delayed_queue_key = "files:llm:delayed"
+
+        # 🔹 Pub/Sub для конфигурации
+        self._config_pubsub = None
+        self._last_config_update = 0.0
+        self._config_update_interval = 1.0  # Проверка обновлений не чаще 1 сек
 
         logger.info("LLMWorker инициализирован")
         logger.info(f"📁 Shared path: {self.settings.shared_files_path}")
         logger.info(f"🔗 Redis: {self.settings.redis_host}:{self.settings.redis_port}")
-        logger.info(f"🤖 Ollama: {self.config.ollama_endpoint}/{self.config.ollama_model}")
+        logger.info(f"🤖 Ollama: {self.config.ollama_endpoint}/{self.config.classifier_model}")
+
+    def _subscribe_to_config_updates(self):
+        """Подписка на канал обновлений конфигурации."""
+        try:
+            self._config_pubsub = self.redis.subscribe([self.CONFIG_CHANNEL])
+            logger.info(f"✅ Подписка на конфигурацию: {self.CONFIG_CHANNEL}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка подписки на конфигурацию: {e}")
+
+    def _check_config_updates(self):
+        """Проверяет и применяет обновления конфигурации из Redis."""
+        if self._config_pubsub is None:
+            return
+
+        # Ограничиваем частоту проверки
+        now = time.time()
+        if now - self._last_config_update < self._config_update_interval:
+            return
+        self._last_config_update = now
+
+        try:
+            message = self._config_pubsub.get_message(timeout=0.01)
+            if not message or message.get("type") != "message":
+                return
+
+            event = json.loads(message["data"])
+            if event.get("type") != "settings_updated":
+                return
+
+            self._apply_config_update(event.get("settings", {}))
+
+        except Exception as e:
+            logger.debug(f"⚠️ Ошибка проверки конфигурации: {e}")
+
+    def _apply_config_update(self, new_settings: Dict[str, Any]):
+        """Применяет новые настройки к воркеру."""
+        updated = False
+
+        # 🔹 Обновление моделей
+        if "llm_classifier_model" in new_settings and new_settings["llm_classifier_model"] != self.config.classifier_model:
+            old = self.config.classifier_model
+            self.config.classifier_model = new_settings["llm_classifier_model"]
+            logger.info(f"🔄 Модель классификации: {old} → {self.config.classifier_model}")
+            updated = True
+
+        if "llm_extractor_model" in new_settings and new_settings["llm_extractor_model"] != self.config.extractor_model:
+            old = self.config.extractor_model
+            self.config.extractor_model = new_settings["llm_extractor_model"]
+            logger.info(f"🔄 Модель экстракции: {old} → {self.config.extractor_model}")
+            updated = True
+
+        # 🔹 Обновление параметров генерации
+        if "llm_temperature" in new_settings:
+            self.config.temperature = float(new_settings["llm_temperature"])
+            logger.info(f"🔄 Температура: {self.config.temperature}")
+            updated = True
+
+        if "llm_max_tokens" in new_settings:
+            self.config.max_tokens = int(new_settings["llm_max_tokens"])
+            logger.info(f"🔄 Max tokens: {self.config.max_tokens}")
+            updated = True
+
+        # 🔹 Пересоздание процессора при изменении критичных настроек
+        if updated:
+            logger.info("🔄 Пересоздание LLMProcessor с новыми настройками...")
+            try:
+                self.processor = LLMProcessor(config=self.config, redis_client=self.redis)
+                logger.info("✅ LLMProcessor обновлён")
+            except Exception as e:
+                logger.error(f"❌ Ошибка обновления процессора: {e}")
 
     def _push_delayed(self, payload: str, delay_sec: int, priority: int = 0):
-        """
-        Добавляет задачу в отложенную очередь через ZADD.
-        Score = timestamp, когда задача станет доступной.
-        Формат члена: "priority:payload"
-        """
         execute_at = time.time() + delay_sec
         member = f"{priority}:{payload}"
         try:
@@ -64,52 +135,28 @@ class LLMWorker:
             logger.error(f"❌ Ошибка добавления в отложенную очередь: {e}")
 
     def _process_delayed_queue(self) -> Tuple[Optional[str], int]:
-        """
-        Проверяет и извлекает готовые задачи из отложенной очереди.
-        Returns: (payload, priority) или (None, 0)
-        """
         try:
-            # Получаем результат (синхронный redis-py возвращает list)
             result = self.redis.client.zpopmin(self.delayed_queue_key, count=1)
-
-            # 🔹 Защита: если вернулась корутина — это ошибка конфигурации
             if result is not None and hasattr(result, "__await__"):
-                logger.error("❌ Redis client returned Awaitable. Use synchronous redis.Redis for worker.")
+                logger.error("❌ Redis client returned Awaitable.")
                 return None, 0
-
-            # Пустой результат
             if not result:
                 return None, 0
-
-            # redis-py возвращает List[Tuple[member, score]]
             member, score = result[0]
-
-            # Декодируем bytes → str если нужно
             if isinstance(member, (bytes, bytearray)):
                 member = member.decode("utf-8")
-
-            # Парсим "priority:payload"
             if ":" not in member:
                 logger.error(f"❌ Invalid delayed queue member format: {member}")
                 return None, 0
-
             priority_str, payload = member.split(":", 1)
             priority = int(priority_str) if priority_str.isdigit() else 0
-
             logger.info(f"📥 Из отложенной очереди: {payload[:50]}... (score={score})")
             return payload, priority
-
         except Exception as e:
             logger.error(f"❌ Ошибка обработки отложенной очереди: {e}", exc_info=True)
             return None, 0
 
     def _process_single_job(self, payload: str, priority: int = 0) -> bool:
-        """
-        Обрабатывает одно задание.
-        Returns: True если задание завершено/передано дальше.
-        """
-
-        # ЭТАП 1: Парсинг
         job, error = FileJob.from_payload_safe(payload)
         if job is None:
             logger.error(f"❌ Не удалось распарсить задание: {error}")
@@ -119,11 +166,18 @@ class LLMWorker:
             FileJob.publish_event(self.redis, event)
             return False
 
-        # ЭТАП 2: Обработка
         try:
             logger.info(f"🎯 LLM задание: {job.file_id} ({job.original_filename})")
 
-            # Обновляем статус
+            # 🔹 Проверяем обновления конфига перед обработкой
+            self._check_config_updates()
+
+            # Применяем настройки из задания, если есть (приоритет над глобальными)
+            if hasattr(job, 'llm_classifier_model') and job.llm_classifier_model:
+                self.config.classifier_model = job.llm_classifier_model
+            if hasattr(job, 'llm_extractor_model') and job.llm_extractor_model:
+                self.config.extractor_model = job.llm_extractor_model
+
             job.status = FileStatus.PROCESSING
             job.current_module = "llm"
             job.updated_at = datetime.now(timezone.utc)
@@ -136,10 +190,8 @@ class LLMWorker:
             )
             FileJob.publish_event(self.redis, event)
 
-            # ВЫПОЛНЕНИЕ
             result_path = self.processor.process(job=job, file_service=self.file_service)
 
-            # 🔹 Успех: результат это путь к JSON
             if result_path:
                 job.completed_modules.add("llm")
                 job.current_module = None
@@ -165,11 +217,8 @@ class LLMWorker:
                     logger.info(f"✅ Завершено: {job.file_id}")
                 return True
 
-            # 🔹 Ожидание UI (pending)
             elif result_path is None and job.classification_pending:
                 attempts = job.metadata.get("pending_requeue_attempts", 0) + 1
-
-                # 🔹 Используем self.config (теперь доступен)
                 if attempts >= self.config.max_pending_requeues:
                     logger.error(f"🚫 Лимит ожиданий исчерпан для {job.file_id}")
                     job.status = FileStatus.FAILED
@@ -182,15 +231,13 @@ class LLMWorker:
                 job.metadata["last_pending_at"] = datetime.now(timezone.utc).isoformat()
                 self.redis.set_file_status(job.file_id, job.to_dict())
 
-                # Экспоненциальная задержка: 30с, 45с, 60с... (макс 5 мин)
                 delay = min(
                     self.config.pending_recheck_delay_sec * (1 + attempts * 0.5),
                     300
                 )
-
                 logger.info(f"🔄 {job.file_id} в отложенной очереди на {delay:.0f}с (попытка {attempts})")
                 self._push_delayed(job.to_payload(), delay, priority=job.priority)
-                return True  # Успешно отложено
+                return True
 
         except LLMProcessingError as e:
             logger.error(f"❌ Ошибка LLM: {e}")
@@ -204,7 +251,6 @@ class LLMWorker:
         return False
 
     def _fail_job(self, job: FileJob, error_msg: str):
-        """Устанавливает статус FAILED и публикует событие."""
         job.status = FileStatus.FAILED
         job.errors.append(error_msg)
         job.updated_at = datetime.now(timezone.utc)
@@ -215,27 +261,28 @@ class LLMWorker:
         ))
 
     def run(self, poll_interval: float = 1.0):
-        """Запуск цикла прослушивания."""
         logger.info("🚀 Запуск LLM worker'а...")
+
+        # 🔹 Подписка на обновления конфигурации
+        self._subscribe_to_config_updates()
 
         while True:
             try:
-                # 1. Проверяем отложенные задачи (приоритет)
-                payload, priority = self._process_delayed_queue()
+                # 🔹 Проверяем обновления конфига в каждом цикле
+                self._check_config_updates()
 
-                # 2. Если нет отложенных, проверяем основную очередь
+                payload, priority = self._process_delayed_queue()
                 if not payload:
                     for queue in self.queues:
                         payload = self.redis.pop_from_queue(queue, timeout=0)
                         if payload:
-                            priority = 0  # Из обычной очереди приоритет уже в пейлоаде
+                            priority = 0
                             break
 
-                # 3. Обработка, если есть задача
                 if payload:
                     logger.info(f"📥 Из очереди")
                     self._process_single_job(payload, priority)
-                    time.sleep(0.2)  # Небольшая пауза после обработки
+                    time.sleep(0.2)
 
                 time.sleep(poll_interval)
 
@@ -246,19 +293,18 @@ class LLMWorker:
                 logger.error(f"❌ Ошибка в цикле: {e}", exc_info=True)
                 time.sleep(poll_interval)
 
+        if self._config_pubsub:
+            self._config_pubsub.close()
         self.redis.close()
         logger.info("👋 Завершение")
 
 
 def main():
-    """Точка входа для Docker."""
     logger.info("🔧 Запуск LLM worker'а...")
-
     try:
         settings = get_settings()
         worker = LLMWorker(settings=settings)
         worker.run()
-
     except KeyboardInterrupt:
         logger.info("🛑 Остановлен пользователем (Ctrl+C)")
         sys.exit(0)

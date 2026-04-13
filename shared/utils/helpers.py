@@ -1,4 +1,3 @@
-# shared/utils/helpers.py
 """
 Вспомогательные функции для всех модулей.
 Единая точка входа для форматирования, работы с путями и Redis.
@@ -9,7 +8,7 @@ import re
 import hashlib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Union, Optional, Dict, Any, List, TYPE_CHECKING
+from typing import Union, Optional, Dict, Any, TYPE_CHECKING
 
 from shared.utils.logger import setup_logger
 
@@ -44,6 +43,7 @@ __all__ = [
     # Проверка дубликатов
     "is_file_already_processed",
     "is_file_already_processed_by_fingerprint",
+    "get_file_id_by_fingerprint",  # 🔹 НОВАЯ ФУНКЦИЯ
     "update_fingerprint_index",
     "cleanup_orphaned_jobs",
     # Redis helpers
@@ -221,9 +221,7 @@ def normalize_string_for_parsing(value: Optional[str]) -> Optional[str]:
     return normalized if normalized else None
 
 
-def is_job_terminal_or_active(job_data: Dict[str, Any]
-
-) -> bool:
+def is_job_terminal_or_active(job_data: Dict[str, Any]) -> bool:
     """Определяет, требует ли джоб повторной обработки."""
     status = job_data.get("status", "unknown")
     retry_count = job_data.get("retry_count", 0)
@@ -243,6 +241,32 @@ def is_job_terminal_or_active(job_data: Dict[str, Any]
 # ============================================================================
 # 🔹 Проверка дубликатов и индексы
 # ============================================================================
+
+def get_file_id_by_fingerprint(fingerprint: str, redis_client: Any) -> Optional[str]:
+    """
+    Получает file_id по fingerprint из индекса Redis.
+
+    Args:
+        fingerprint: Уникальный отпечаток файла (16-символьный hex)
+        redis_client: Экземпляр RedisClient
+
+    Returns:
+        str | None: file_id если найден, иначе None
+    """
+    if not fingerprint or not redis_client:
+        return None
+
+    try:
+        key = FILE_FINGERPRINT_INDEX.format(fingerprint=fingerprint)
+        file_id = redis_client.get(key)
+        if file_id:
+            logger.debug(f"🔍 Найден file_id по fingerprint: {fingerprint} → {file_id}")
+            return file_id
+        return None
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска file_id по fingerprint {fingerprint}: {e}")
+        return None
+
 
 def is_file_already_processed_by_fingerprint(
         fingerprint: str,

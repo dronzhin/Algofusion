@@ -26,6 +26,11 @@ class OCRProcessingConfig:
     easyocr_gpu: bool = os.getenv("OCR_EASYOCR_GPU", "0") == "1"
     easyocr_min_score: float = float(os.getenv("OCR_EASYOCR_MIN_SCORE", "0.5"))
 
+    # === GLM параметры ===
+    glm_prompt: str = "Text Recognition:"  # Промпт для распознавания
+    glm_max_tokens: int = 2048             # Макс. токенов в ответе
+    glm_temperature: float = 0.0           # Температура генерации (0.0 = детерминировано)
+
     # === Общие ===
     supported_input_formats: tuple[str, ...] = field(default_factory=lambda: (
         ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif"

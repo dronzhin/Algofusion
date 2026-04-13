@@ -147,13 +147,16 @@ services:
       - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
-      - OCR_DEFAULT_ENGINE=${OCR_ENGINE:-tesseract}
-      - OCR_DEFAULT_LANG=${OCR_LANGS:-rus+eng}
+      - OCR_DEFAULT_ENGINE=${OCR_DEFAULT_ENGINE:-tesseract}
+      - OCR_DEFAULT_LANG=${OCR_DEFAULT_LANG:-rus+eng}
       - OCR_TESSERACT_OEM=1
       - OCR_TESSERACT_PSM=11
       - OCR_TESSERACT_DPI=${OCR_DPI:-300}
       - OCR_EASYOCR_GPU=0
       - OCR_EASYOCR_MIN_SCORE=0.5
+      - GLM_PROMPT=${GLM_PROMPT:-Text Recognition:}
+      - GLM_MAX_TOKENS=${GLM_MAX_TOKENS:-2048}
+      - GLM_TEMPERATURE=${GLM_TEMPERATURE:-0.0}
     depends_on:
       redis:
         condition: service_healthy
@@ -168,7 +171,7 @@ services:
           memory: "${OCR_MEMORY_LIMIT:-2G}"
         reservations:
           cpus: "0.5"
-          memory: "512M"
+          memory: "12G"
 
   # --------------------------------------------------------------------------
   # 🆕 OLLAMA - LLM inference server (GPU/CPU авто-детект)
@@ -283,6 +286,10 @@ volumes:
     driver: local
     labels:
       - "com.algofusion.description=Ollama models cache"
+  ocr_cache:
+    driver: local
+    labels:
+      - "com.algofusion.description=OCR models cache (HuggingFace/Surya/GLM)"
 
 # ============================================================================
 # NETWORKS (изолированная сеть для сервисов)

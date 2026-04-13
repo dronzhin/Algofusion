@@ -1,8 +1,8 @@
-# monitor/file_monitor.py
 """
 Мониторинг внешней папки + автоматическое восстановление зависших джобов.
 🔹 При старте: сразу проверяет Redis и возобновляет обработку.
 🔹 Проверяет ТОЛЬКО оригинальный файл. Промежуточные файлы воркеры перегенерируют.
+🔹 Двухэтапная проверка дубликатов: Redis + файловая система.
 """
 
 import time
@@ -11,7 +11,7 @@ import uuid
 import os
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 
 from shared.models.file import FileJob, FileStatus
@@ -21,10 +21,10 @@ from shared.utils.logger import setup_logger
 from shared.utils.helpers import (
     safe_mkdir,
     get_file_fingerprint,
-    is_file_already_processed_by_fingerprint,
     update_fingerprint_index,
     validate_file_exists,
-    FILE_FINGERPRINT_INDEX
+    FILE_FINGERPRINT_INDEX,
+    get_file_id_by_fingerprint
 )
 from core.services.redis_client import get_redis_client
 
@@ -35,6 +35,7 @@ class FileMonitor:
     """
     Мониторит внешнюю папку и восстанавливает зависшие джобы.
     🔹 Recovery запускается сразу при старте, затем каждые 60 секунд.
+    🔹 Дубликаты проверяются с валидацией целостности (Redis + диск).
     """
 
     MIN_FILE_SIZE = 1024  # 1 KB
@@ -113,6 +114,49 @@ class FileMonitor:
             return False
         return True
 
+    def _is_duplicate_with_validation(self, fingerprint: str) -> Tuple[bool, Optional[str]]:
+        """
+        Проверяет дубликат с валидацией целостности (Redis + диск).
+
+        Returns:
+            (is_duplicate, reason):
+            - (True, None) — настоящий дубликат, файл существует и активен
+            - (False, "orphaned") — fingerprint в Redis, но файла нет на диске
+            - (False, "failed_retry") — файл в статусе failed, разрешаем перезагрузку
+            - (False, "expired") — файл старше 24ч, разрешаем перезагрузку
+            - (False, None) — не дубликат, можно загружать
+        """
+        # 1. Проверяем наличие fingerprint в индексе
+        file_id = get_file_id_by_fingerprint(fingerprint, self.redis)
+        if not file_id:
+            return False, None  # Не дубликат
+
+        # 2. Проверяем, существует ли файл на диске
+        base_path = self.shared_path / file_id
+        if not base_path.exists():
+            # ⚠️ Файл в Redis есть, но на диске нет — "сирота"
+            return False, "orphaned"
+
+        # 3. Проверяем статус в Redis
+        file_status = self.redis.get_file_status(file_id)
+        if file_status:
+            status = file_status.get("status")
+            # Разрешаем перезагрузку, если файл в ошибке
+            if status == "failed":
+                return False, "failed_retry"
+            # Разрешаем перезагрузку, если файл старше 24 часов
+            updated_at = file_status.get("updated_at")
+            if updated_at:
+                try:
+                    updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    if datetime.now(timezone.utc) - updated_dt > timedelta(hours=24):
+                        return False, "expired"
+                except (ValueError, AttributeError):
+                    pass
+
+        # ✅ Настоящий дубликат — файл существует и активен
+        return True, None
+
     def _check_incoming_files(self):
         """Проверка новых файлов во внешней папке."""
         if not self.external_path.exists():
@@ -125,20 +169,44 @@ class FileMonitor:
             if not self._is_file_ready(item):
                 continue
             source_fp = get_file_fingerprint(item, use_content=True)
-            if source_fp and is_file_already_processed_by_fingerprint(source_fp, self.redis):
-                logger.info(f"✅ Дубликат обнаружен (fp: {source_fp}), пропускаем: {item.name}")
-                self.redis.publish_event("files:events", {
-                    "type": "log_only", "log_level": "WARNING",
-                    "log_msg": f"🗑️ Дубликат удалён: {item.name}",
-                    "filename": item.name, "fingerprint": source_fp,
-                    "timestamp": datetime.now(timezone.utc).isoformat(), "ui_action": "none"
-                })
-                try:
-                    item.unlink()
-                    logger.info(f"🗑️ Дубликат удалён: {item.name}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Не удалось удалить дубликат {item.name}: {e}")
-                continue
+
+            # 🔹 ДВУХЭТАПНАЯ ПРОВЕРКА ДУБЛИКАТОВ
+            if source_fp:
+                is_dup, reason = self._is_duplicate_with_validation(source_fp)
+
+                if is_dup:
+                    # ✅ Настоящий дубликат — пропускаем
+                    logger.info(f"✅ Дубликат обнаружен (fp: {source_fp}), пропускаем: {item.name}")
+                    self.redis.publish_event("files:events", {
+                        "type": "log_only", "log_level": "WARNING",
+                        "log_msg": f"🗑️ Дубликат: {item.name}",
+                        "filename": item.name, "fingerprint": source_fp,
+                        "timestamp": datetime.now(timezone.utc).isoformat(), "ui_action": "none"
+                    })
+                    try:
+                        item.unlink()
+                        logger.info(f"🗑️ Дубликат удалён: {item.name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Не удалось удалить дубликат {item.name}: {e}")
+                    continue
+
+                elif reason == "orphaned":
+                    # ⚠️ Файл в Redis есть, но на диске нет — чистим "сироту"
+                    logger.warning(f"🧹 Обнаружен 'сирота': fingerprint {source_fp} без файла на диске")
+                    try:
+                        redis_key = f"{FILE_FINGERPRINT_INDEX}:{source_fp}"
+                        self.redis.delete(redis_key)
+                        logger.info(f"🗑️ Удалён орфанный индекс: {source_fp}")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка очистки сироты {source_fp}: {e}")
+                    # Продолжаем обработку — файл можно загружать заново
+
+                elif reason in ("failed_retry", "expired"):
+                    # ℹ️ Файл был в ошибке или устарел — разрешаем перезагрузку
+                    logger.info(f"🔄 Разрешена перезагрузка: {item.name} (причина: {reason})")
+                    # Продолжаем обработку
+
+            # Если нет fingerprint или проверка прошла — обрабатываем файл
             file_id = str(uuid.uuid4())[:8]
             if not self._process_new_file(item, file_id, source_fp):
                 logger.warning(f"⏸️ Файл {item.name} не обработан")
@@ -194,7 +262,7 @@ class FileMonitor:
 
             fingerprint = precomputed_fingerprint or get_file_fingerprint(dest_path, use_content=True)
 
-            ext = source_path.suffix.lower()  # suffix работает, т.к. Path-объект ещё хранит имя
+            ext = source_path.suffix.lower()
             type_map = {
                 ".pdf": FileType.PDF, ".doc": FileType.DOCUMENT, ".docx": FileType.DOCUMENT,
                 ".png": FileType.IMAGE, ".jpg": FileType.IMAGE, ".jpeg": FileType.IMAGE,
@@ -206,7 +274,7 @@ class FileMonitor:
                 file_id=file_id,
                 original_filename=source_path.name,
                 file_type=file_type,
-                file_size=file_size,  # 🔹 Используем сохранённое значение, а не stat()
+                file_size=file_size,
                 status=FileStatus.UPLOADED,
                 current_module="preprocess",
                 export_to_1c=True,

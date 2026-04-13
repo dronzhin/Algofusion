@@ -24,6 +24,7 @@ from ui.components.stats_panel import render_stats_panel
 from ui.components.log_viewer import render_log_viewer
 from ui.components.file_list import render_file_list
 from ui.components.refresh_settings import render_refresh_settings, get_refresh_config
+from ui.components.engine_selector import render_engine_selector, get_selected_engines
 
 logger = setup_logger("ui.pages.main_page")
 
@@ -192,14 +193,17 @@ def render_main_page(session: SessionState) -> None:
 def render_sidebar(session: SessionState) -> None:
     """
     Рендерит боковую панель настроек.
-
     Содержит: автообновление, фильтры, статус системы.
     """
-    with st.sidebar:
+    with st.sidebar:  # ← Один единственный блок sidebar
         st.header("⚙️ Настройки")
 
         # 🔹 Блок: Автообновление
         render_refresh_settings(session, key_prefix="main")
+        st.divider()
+
+        # 🔹 НОВОЕ: Выбор движков (без вложенного with st.sidebar!)
+        render_engine_selector(session, key_prefix="main")
         st.divider()
 
         # 🔹 Блок: Фильтры

@@ -10,6 +10,8 @@ from PIL import Image
 
 from shared.utils.logger import setup_logger
 from workers.OCR.src.ocr.base import OCREngine
+import easyocr
+
 
 logger = setup_logger("workers.ocr.ocr.easyocr")
 
@@ -29,7 +31,6 @@ class EasyOCREngine(OCREngine):
     def _get_reader(self):
         """Ленивая инициализация EasyOCR Reader."""
         if self._reader is None:
-            import easyocr
             self._reader = easyocr.Reader(
                 self.lang_list,
                 gpu=self.gpu,

@@ -14,6 +14,7 @@ from shared.models.file import FileJob
 from workers.OCR.src.config import OCRProcessingConfig
 from workers.OCR.src.ocr.tesseract import TesseractEngine
 from workers.OCR.src.ocr.easyocr import EasyOCREngine
+from workers.OCR.src.ocr.surya import SuryaEngine
 
 logger = setup_logger("workers.ocr.services.ocr_processor")
 
@@ -39,6 +40,7 @@ class OCRProcessor:
         # Инициализируем движок
         engine_name = config.default_engine
 
+
         engine_config = {
             "lang": config.default_lang,
             "oem": config.tesseract_oem,
@@ -46,16 +48,46 @@ class OCRProcessor:
             "preprocess": config.tesseract_preprocess,
             "gpu": config.easyocr_gpu,
             "min_score": config.easyocr_min_score,
+            # Параметры для GLM
+            "glm_prompt": config.glm_prompt,
+            "glm_max_tokens": config.glm_max_tokens,
+            "glm_temperature": config.glm_temperature,
         }
 
+        # 🔹 Динамический импорт и проверка доступности
         if engine_name == "tesseract":
+            from workers.OCR.src.ocr.tesseract import TesseractEngine
             self.engine = TesseractEngine(engine_config)
+
         elif engine_name == "easyocr":
-            # Для EasyOCR нужен список языков
-            engine_config["lang"] = config.default_lang.split("+") if "+" in config.default_lang else [config.default_lang]
+            from workers.OCR.src.ocr.easyocr import EasyOCREngine
+            engine_config["lang"] = config.default_lang.split("+") if "+" in config.default_lang else [
+                config.default_lang]
             self.engine = EasyOCREngine(engine_config)
+
+        elif engine_name == "surya":
+            from workers.OCR.src.ocr.surya import SuryaEngine
+            surya_config = {"lang": config.default_lang}
+            self.engine = SuryaEngine(surya_config)
+
+        elif engine_name == "glm":
+            from workers.OCR.src.ocr.glm import GLMEngine
+            glm_config = {
+                "lang": config.default_lang,
+                "glm_prompt": config.glm_prompt,
+                "glm_max_tokens": config.glm_max_tokens,
+                "glm_temperature": config.glm_temperature,
+            }
+            self.engine = GLMEngine(glm_config)
+
         else:
-            raise ValueError(f"Неизвестный OCR движок: {engine_name}")
+            available = ["tesseract", "easyocr", "surya", "glm"]
+            raise ValueError(
+                f"Неизвестный OCR движок: {engine_name}. "
+                f"Доступные: {available}"
+            )
+
+        logger.info(f"✅ OCR-движок инициализирован: {engine_name}")
 
     def process(self, job: FileJob, file_service) -> List[Path]:
         """

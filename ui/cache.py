@@ -16,9 +16,9 @@ logger = setup_logger("ui.cache")
 # ============================================================================
 
 CACHE_TTL = {
-    "file_stats": 15,
-    "files_list": 15,
-    "file_details": 15,
+    "file_stats": 15000,
+    "files_list": 15000,
+    "file_details": 15000,
     "redis_connection": 86400,
 }
 
@@ -182,6 +182,7 @@ def run_startup_validation(_redis_client, _file_service) -> Dict[str, int]:
     """
     🔹 Запускается ОДИН РАЗ при старте UI-сервера.
     Удаляет из Redis записи, у которых удалена базовая директория.
+    🔹 Также очищает индекс fingerprint для удалённых файлов.
     """
     logger.info("🧹 Запуск валидации файлов при старте UI...")
     if not _redis_client or not _file_service:
@@ -199,10 +200,12 @@ def run_startup_validation(_redis_client, _file_service) -> Dict[str, int]:
             if not base_path.exists():
                 try:
                     _redis_client.delete_file_status(file_id)
-                    # Удаляем индекс fingerprint, если есть
+                    # 🔹 Удаляем индекс fingerprint, если есть
                     fp = file_data.get("metadata", {}).get("file_fingerprint")
-                    if fp and hasattr(_redis_client, 'delete'):
-                        _redis_client.delete(f"file:fp:{fp}")
+                    if fp:
+                        from shared.utils.helpers import FILE_FINGERPRINT_INDEX
+                        _redis_client.delete(f"{FILE_FINGERPRINT_INDEX}:{fp}")
+                        logger.debug(f"🗑️ Удалён индекс fingerprint: {fp}")
                     cleaned += 1
                     logger.info(f"🗑️ Удалена мёртвая запись из Redis: {file_id}")
                 except Exception as e:
@@ -216,7 +219,6 @@ def run_startup_validation(_redis_client, _file_service) -> Dict[str, int]:
     except Exception as e:
         logger.error(f"❌ Ошибка валидации при старте: {e}", exc_info=True)
         return {"cleaned": 0, "checked": 0}
-
 
 # ============================================================================
 # 🧹 CACHE MANAGER
