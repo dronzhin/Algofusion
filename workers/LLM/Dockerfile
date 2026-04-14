@@ -17,6 +17,10 @@ COPY shared/ /app/shared/
 COPY core/ /app/core/
 COPY workers/LLM/ /app/workers/LLM/
 
+RUN find /app -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+RUN find /app -name "*.pyc" -delete 2>/dev/null || true
+RUN find /app -name "*.pyo" -delete 2>/dev/null || true
+
 # Создаём непривилегированного пользователя
 ARG UID=1000
 ARG GID=1000

@@ -16,10 +16,10 @@ logger = setup_logger("ui.cache")
 # ============================================================================
 
 CACHE_TTL = {
-    "file_stats": 15000,
-    "files_list": 15000,
-    "file_details": 15000,
-    "redis_connection": 86400,
+    "file_stats": 15,
+    "files_list": 15,
+    "file_details": 15,
+    "redis_connection": 300,
 }
 
 BASE_FILES_DIR = Path("/shared/files")

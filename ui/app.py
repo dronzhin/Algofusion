@@ -82,17 +82,47 @@ def main():
     # 🔹 ОБРАБОТКА СОБЫТИЙ И РЕНДЕРИНГ
     # ========================================================================
 
+    # ========================================================================
+    # 🔹 ОБРАБОТКА СОБЫТИЙ И РЕНДЕРИНГ
+    # ========================================================================
+
     try:
+        # 🔹 Явный роутинг по страницам
         if session.current_page == "main":
             render_main_page(session)
+
+        # 🔹 НОВОЕ: Страница редактирования файла
+        elif session.current_page == "edit":
+            from ui.pages.file_detail_page import render_file_detail_page
+
+            # 🔹 Получаем file_id из сессии (устанавливается в navigate())
+            file_id = getattr(session, "file_id", None)
+
+            if file_id:
+                # 🔹 Опционально: найти индекс файла для совместимости с текущим API
+                from ui.utils.redis_helpers import safe_get_all_files
+                files = safe_get_all_files(session.redis_client)
+                for idx, f in enumerate(files):
+                    if f.get("file_id") == file_id:
+                        session.editing_file_index = idx
+                        break
+
+            render_file_detail_page(session)
+
+        # 🔹 Fallback для неизвестных страниц
         else:
-            st.error(f"❌ Неизвестная страница: {session.current_page}")
+            logger.warning(f"⚠️ Неизвестная страница: {session.current_page}, возврат на main")
+            st.warning(f"⚠️ Страница '{session.current_page}' не найдена")
             session.navigate("main")
             render_main_page(session)
 
     except Exception as e:
         logger.error(f"❌ Ошибка рендеринга страницы: {e}", exc_info=True)
         st.error(f"❌ Критическая ошибка: {e}")
+        # 🔹 При ошибке всегда возвращаемся на главную
+        if session.current_page != "main":
+            session.navigate("main")
+            render_main_page(session)
 
 
 if __name__ == "__main__":

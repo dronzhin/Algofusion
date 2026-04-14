@@ -141,12 +141,17 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ${HOST_SHARED_FILES_PATH:-./shared/files}:/shared/files:rw
+      - ocr_cache:/app/cache  # 🔹 Том для кэша моделей
     environment:
+      # === Redis ===
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
+      # === Files ===
       - SHARED_FILES_PATH=${SHARED_FILES_PATH:-/shared/files}
+      # === Logging ===
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONPATH=/app
+      # === OCR Settings ===
       - OCR_DEFAULT_ENGINE=${OCR_DEFAULT_ENGINE:-tesseract}
       - OCR_DEFAULT_LANG=${OCR_DEFAULT_LANG:-rus+eng}
       - OCR_TESSERACT_OEM=1
@@ -157,6 +162,21 @@ services:
       - GLM_PROMPT=${GLM_PROMPT:-Text Recognition:}
       - GLM_MAX_TOKENS=${GLM_MAX_TOKENS:-2048}
       - GLM_TEMPERATURE=${GLM_TEMPERATURE:-0.0}
+
+      # 🔹 === Явные пути к кэшу (решают проблему getpwuid) ===
+      - HF_HOME=/app/cache/huggingface
+      - SURYA_CACHE_DIR=/app/cache/surya
+      - TORCH_HOME=/app/cache/torch
+      - TORCHINDUCTOR_CACHE_DIR=/app/cache/torch/inductor
+      - XDG_CACHE_HOME=/app/cache/xdg
+      - XDG_DATA_HOME=/app/cache/xdg/data
+      - XDG_CONFIG_HOME=/app/cache/xdg/config
+
+      # 🔹 === Переопределение переменных для библиотек, использующих getpass ===
+      - USER=appuser
+      - LOGNAME=appuser
+      - HOME=/app
+      - USERNAME=appuser
     depends_on:
       redis:
         condition: service_healthy
@@ -167,11 +187,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${OCR_CPU_LIMIT:-2}"
-          memory: "${OCR_MEMORY_LIMIT:-2G}"
+          cpus: "${OCR_CPU_LIMIT:-4}"
+          memory: "${OCR_MEMORY_LIMIT:-16G}"  # 🔹 Раскомментировано + увеличено для Surya
         reservations:
-          cpus: "0.5"
-          memory: "12G"
+          cpus: "1"
+          memory: "12G"                       # 🔹 Раскомментировано
 
   # --------------------------------------------------------------------------
   # 🆕 OLLAMA - LLM inference server (GPU/CPU авто-детект)
@@ -186,7 +206,7 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_NUM_GPU=-1
+      - OLLAMA_NUM_GPU=10
     networks:
       - app-network
 
