@@ -27,7 +27,7 @@ class OCRProcessingConfig:
     easyocr_min_score: float = float(os.getenv("OCR_EASYOCR_MIN_SCORE", "0.5"))
 
     # === GLM параметры ===
-    glm_prompt: str = "Text Recognition:"  # Промпт для распознавания
+    glm_prompt: str = "Распознай текст, на картинке сканы документов: Товарная накладная, счет, счет протокол, приказ, платежное поручение, договор:"  # Промпт для распознавания
     glm_max_tokens: int = 2048             # Макс. токенов в ответе
     glm_temperature: float = 0.0           # Температура генерации (0.0 = детерминировано)
 

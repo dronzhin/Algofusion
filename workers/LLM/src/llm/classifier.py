@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # workers/LLM/src/llm/classifier.py
 """
-Классификатор документов на базе Ollama с strict JSON mode.
-Использует DocumentType enum из shared.models.file.enums.
+Классификатор документов на базе Ollama.
+✅ Исправлено для Qwen 3.5: устойчивость к пустым ответам, убраны конфликтующие stop-токены.
 """
 
 from typing import Tuple, Optional, Dict, Any, List
 import json
+import re
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -19,26 +20,18 @@ logger = setup_logger("workers.llm.classifier")
 
 
 class OllamaClassifier(ClassifierEngine):
-    """Классификатор на базе Ollama API с strict JSON output."""
+    """Универсальный классификатор на базе Ollama API."""
 
     name = "ollama_classifier"
 
-    # 🔹 Строгая схема ответа для классификации
     CLASSIFICATION_SCHEMA = {
         "type": "object",
         "properties": {
-            "type": {
-                "type": "string",
-                "enum": []  # Заполняется динамически из allowed_types
-            },
-            "confidence": {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 1.0
-            }
+            "type": {"type": "string", "enum": []},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
         },
         "required": ["type", "confidence"],
-        "additionalProperties": False  # 🔹 Запрещаем лишние поля!
+        "additionalProperties": False
     }
 
     def __init__(self, config: dict):
@@ -47,11 +40,9 @@ class OllamaClassifier(ClassifierEngine):
         self.model = config.get("ollama_model", "qwen2.5:1.5b")
         self.timeout = config.get("ollama_timeout", 120)
 
-        # 🔹 Получаем allowed_types из config или из DocumentType enum
         raw_types = config.get("allowed_doc_types", [])
         self.allowed_types: List[str] = []
         for t in raw_types:
-            # Преобразуем в канонический вид через enum
             parsed = DocumentType.safe_parse(t)
             if parsed:
                 self.allowed_types.append(parsed.value)
@@ -61,45 +52,55 @@ class OllamaClassifier(ClassifierEngine):
         if not self.allowed_types:
             self.allowed_types = [dt.value for dt in DocumentType]
 
-        # 🔹 Обновляем enum в схеме динамически
         self._schema = self.CLASSIFICATION_SCHEMA.copy()
         self._schema["properties"]["type"]["enum"] = self.allowed_types
+
+        # 🔹 Qwen 3.5 плохо работает с format:schema, используем format:"json"
+        self._supports_format_schema = False
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, json.JSONDecodeError)),
+        retry=retry_if_exception_type((httpx.RequestError, json.JSONDecodeError, ValueError)),
         reraise=True
     )
     def _call_ollama(self, prompt: str, schema: Optional[Dict[str, Any]] = None) -> str:
-        """Вызов Ollama API с strict JSON mode."""
-        url = f"{self.endpoint}/api/generate"
+        """Вызов Ollama API с защитой от пустых ответов Qwen 3.5."""
+        url = f"{self.endpoint}/api/chat"
 
+        # 🔹 Упрощаем payload: убираем system message (он конфликтует с format:"json" в Qwen 3.5)
         payload = {
             "model": self.model,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "format": "json",  # 🔹 Жёстко используем "json", схема встроена в промпт
             "options": {
-                "temperature": 0.0,  # 🔹 Детерминированный вывод
+                "temperature": 0.1,  # 🔹 0.1 вместо 0.0 предотвращает вырождение Qwen 3.5
                 "num_predict": 256,
+                "num_ctx": 4096,
+                # 🔹 Убираем stop-токены: они часто срезают ответ у Qwen 3.5
             }
         }
-
-        # 🔹 STRICT JSON MODE: передаём схему напрямую в Ollama
-        if schema:
-            payload["format"] = schema
-        else:
-            payload["format"] = "json"
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(url, json=payload)
             response.raise_for_status()
             result = response.json()
-            raw_response = result.get("response", "")
-            return self._extract_json_from_response(raw_response)
+
+            # 🔹 Безопасное извлечение контента
+            content = result.get("message", {}).get("content", "").strip()
+            if not content:
+                logger.warning(f"⚠️ Пустой ответ от Ollama. Raw: {result}")
+                raise ValueError("Empty response from model")  # Триггерит retry
+
+            return self._extract_json_from_response(content)
 
     def _extract_json_from_response(self, text: str) -> str:
-        """Извлекает валидный JSON из ответа модели."""
+        """Извлекает валидный JSON из ответа."""
+        text = re.sub(r'```json\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'```\s*$', '', text)
+        text = re.sub(r'^```.*?\n', '', text, flags=re.DOTALL)
+
         start = text.find('{')
         end = text.rfind('}') + 1
         if start >= 0 and end > start:
@@ -112,8 +113,8 @@ class OllamaClassifier(ClassifierEngine):
         return text.strip()
 
     def classify(self, text: str) -> Tuple[str, float]:
-        """Классификация текста документа с strict JSON."""
-        truncated = text[:4000]
+        """Классификация текста документа."""
+        truncated = text[:3000]
         prompt = load_classifier_prompt(text=truncated, allowed_types=self.allowed_types)
 
         try:

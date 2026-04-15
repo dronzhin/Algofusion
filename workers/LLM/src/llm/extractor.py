@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # workers/LLM/src/llm/extractor.py
 """
-Экстрактор структурированных данных на базе Ollama с strict JSON Schema mode.
+Экстрактор структурированных данных на базе Ollama — УНИВЕРСАЛЬНЫЙ.
+✅ Исправлено для Qwen 3.5: устойчивость к пустым ответам, убраны конфликтующие параметры.
 """
 
 from typing import Optional, Dict, Any
@@ -18,7 +19,7 @@ logger = setup_logger("workers.llm.extractor")
 
 
 class OllamaExtractor(ExtractorEngine):
-    """Экстрактор данных на базе Ollama API с strict JSON Schema."""
+    """Универсальный экстрактор с валидацией против OCR-текста."""
 
     name = "ollama_extractor"
 
@@ -27,46 +28,61 @@ class OllamaExtractor(ExtractorEngine):
         self.endpoint = config.get("ollama_endpoint", "http://ollama:11434")
         self.model = config.get("ollama_model", "qwen2.5:7b")
         self.timeout = config.get("ollama_timeout", 120)
+
+        # 🔹 Qwen 3.5: temperature 0.1 вместо 0.0 предотвращает вырождение
         self.temperature = config.get("temperature", 0.1)
         self.max_tokens = config.get("max_tokens", 4096)
+
+        # 🔹 Qwen 3.5 плохо работает с format:schema → принудительно "json"
+        self._supports_format_schema = False
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, json.JSONDecodeError)),
+        retry=retry_if_exception_type((httpx.RequestError, json.JSONDecodeError, ValueError)),
         reraise=True
     )
     def _call_ollama(self, prompt: str, schema: Optional[Dict[str, Any]] = None) -> str:
-        """Вызов Ollama API с strict JSON Schema mode."""
-        url = f"{self.endpoint}/api/generate"
+        """Вызов Ollama API с защитой от пустых ответов Qwen 3.5."""
+        url = f"{self.endpoint}/api/chat"
 
+        # 🔹 Упрощаем payload: убираем system message (конфликтует с format:"json" в Qwen 3.5)
+        # Инструкция уже внутри промпта из load_extractor_prompt()
         payload = {
             "model": self.model,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "format": "json",  # 🔹 Жёстко используем "json", схема встроена в промпт
             "options": {
-                "temperature": self.temperature,
+                "temperature": self.temperature,  # 🔹 0.1 вместо 0.0
+                "top_p": 0.95,
                 "num_predict": self.max_tokens,
+                "num_ctx": 8192,  # 🔹 Увеличиваем контекст для длинных документов
+                # 🔹 Убираем stop-токены: они часто срезают ответ у Qwen 3.5
             }
         }
-
-        # 🔹 КЛЮЧЕВОЕ: передаём JSON Schema напрямую в Ollama
-        if schema and schema.get("properties"):
-            payload["format"] = schema
-        else:
-            payload["format"] = "json"
 
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(url, json=payload)
             response.raise_for_status()
             result = response.json()
-            raw_response = result.get("response", "")
-            return self._extract_json_from_response(raw_response)
+
+            # 🔹 Безопасное извлечение контента
+            content = result.get("message", {}).get("content", "").strip()
+            if not content:
+                logger.warning(f"⚠️ Пустой ответ от Ollama. Raw: {result}")
+                raise ValueError("Empty response from model")  # 🔹 Триггерит retry
+
+            return self._extract_json_from_response(content)
 
     def _extract_json_from_response(self, text: str) -> str:
         """Извлекает валидный JSON из ответа."""
-        text = re.sub(r'```json\s*', '', text)
+        # 🔹 Удаляем markdown code blocks
+        text = re.sub(r'```json\s*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'```\s*$', '', text)
+        text = re.sub(r'^```.*?\n', '', text, flags=re.DOTALL)
+
+        # 🔹 Ищем JSON объект
         start = text.find('{')
         end = text.rfind('}') + 1
         if start >= 0 and end > start:
@@ -76,21 +92,32 @@ class OllamaExtractor(ExtractorEngine):
                 return candidate
             except json.JSONDecodeError:
                 pass
+
+        # 🔹 Ищем массив
+        start_arr = text.find('[')
+        end_arr = text.rfind(']') + 1
+        if start_arr >= 0 and end_arr > start_arr:
+            candidate = text[start_arr:end_arr]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+
         return text.strip()
 
     def extract(
             self,
             text: str,
             schema: Optional[Dict[str, Any]],
-            doc_type: str,
-            prompt_hints: str = ""
+            doc_type: str
     ) -> Optional[Dict[str, Any]]:
-        """Извлечение структурированных данных с strict JSON Schema."""
+        """Извлечение данных с защитой от галлюцинаций."""
         prompt = load_extractor_prompt(
             text=text,
             schema=schema or {},
             doc_type=doc_type,
-            prompt_hints=prompt_hints
+            prompt_hints=""
         )
 
         try:
@@ -98,11 +125,15 @@ class OllamaExtractor(ExtractorEngine):
             extracted = json.loads(response)
 
             if extracted and isinstance(extracted, dict):
-                if schema and "required" in schema:
-                    missing = [f for f in schema["required"] if f not in extracted and not f.startswith("_")]
-                    if missing:
-                        logger.warning(f"⚠️ Отсутствуют обязательные поля для {doc_type}: {missing}")
+                # 🔹 Пост-валидация: убираем поля, которых нет в схеме
+                if schema and "properties" in schema:
+                    allowed_fields = set(schema["properties"].keys()) | {"_meta"}
+                    for key in list(extracted.keys()):
+                        if key not in allowed_fields and not key.startswith("_"):
+                            logger.warning(f"⚠️ Удалено лишнее поле '{key}' (галлюцинация?)")
+                            del extracted[key]
 
+                # 🔹 Добавляем метаданные
                 extracted["_meta"] = {
                     "document_type": doc_type,
                     "model": self.model,
@@ -112,7 +143,7 @@ class OllamaExtractor(ExtractorEngine):
             return extracted if isinstance(extracted, dict) else None
 
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Ошибка парсинга JSON: {e}, raw: {response[:100]}")
+            logger.error(f"❌ Ошибка парсинга JSON: {e}, raw: {response[:200]}")
             return None
         except Exception as e:
             logger.error(f"❌ Ошибка экстракции: {e}")

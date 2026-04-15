@@ -1,3 +1,4 @@
+# workers/OCR/requirements.txt
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0
@@ -85,3 +86,4 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 virtualenv==21.2.1
 requests
+accelerate>=0.34.0

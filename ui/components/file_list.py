@@ -118,200 +118,149 @@ def _render_file_card(
         on_edit: Optional[Callable[[str], None]] = None,
         on_export: Optional[Callable[[str], None]] = None,
 ) -> None:
-    """Компактная карточка файла с отображением прогресса по всем модулям."""
+    """
+    Компактная карточка файла.
+    🔹 Заголовок всегда виден.
+    🔹 Детали и кнопки внутри раскрывающегося списка (Expander).
+    """
     file_id = file.get("file_id", f"file_{idx}")
     filename = file.get("original_filename", "unknown")
     file_size = file.get("file_size", 0)
     status = file.get("status", "unknown")
     created_at = format_datetime_short(file.get("created_at"))
     size_formatted = format_file_size(file_size)
+    current_module = file.get("current_module", "")
 
-    # Иконка статуса для заголовка
-    status_icon = {
-        "uploaded": "📁", "processing": "⏳", "completed": "✅",
-        "exported": "📤", "failed": "❌"
-    }.get(status, "❓")
+    # 🔹 Классификация из метаданных
+    metadata = file.get("metadata", {})
+    doc_type = metadata.get("document_type", "—")
+    confidence = metadata.get("classification_confidence")
+    conf_str = f"{confidence:.0%}" if confidence is not None else "—"
+    classification_str = f"{doc_type} ({conf_str})" if doc_type not in ("unknown", "—") else "Не определено"
 
-    # Цвет бейджа статуса
+    # 🔹 Статус для отображения
     status_config = FILE_STATUS_CONFIG.get(status, FILE_STATUS_CONFIG["uploaded"])
     status_label = status_config["label"]
     status_color = status_config["color"]
     status_bg = status_config["bg"]
 
-    # Заголовок: название слева, статус справа
+    # ========================================================================
+    # 🔹 1. ЗАГОЛОВОК: Всегда виден (Название + Статус)
+    # ========================================================================
     header_left, header_right = st.columns([4, 1], gap="small")
 
     with header_left:
-        truncated_name = truncate_filename(filename, 40)
-        st.markdown(f"**{status_icon} {truncated_name}**")
+        # Крупное название файла
+        st.markdown(f"### 📄 {truncate_filename(filename, 45)}")
 
     with header_right:
-        badge_html = f"""
-        <span style="
-            background-color: {status_bg};
-            color: {status_color};
-            padding: 3px 8px;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 10px;
-            white-space: nowrap;
-        ">
-            {status_label}
-        </span>
-        """
-        st.markdown(badge_html, unsafe_allow_html=True)
+        # Бейдж статуса справа
+        st.markdown(
+            f"<span style='background:{status_bg};color:{status_color};padding:4px 10px;border-radius:10px;font-weight:700;font-size:0.9rem'>{status_label}</span>",
+            unsafe_allow_html=True
+        )
 
-    # 🔹 Проверяем существование файла на диске
-    file_path = get_safe_file_path(file_id, filename, BASE_FILES_DIR)
-    file_exists = file_path is not None and file_path.exists()
+    # ========================================================================
+    # 🔹 2. ЭКСПАНДЕР: Скрытые детали и действия (По умолчанию закрыт)
+    # ========================================================================
+    with st.expander("📊 Детали и действия", expanded=False, key=f"exp_{file_id}"):
 
-    # 🔹 Expander с контентом
-    with st.expander("📊 Детали", expanded=False):
-        # Информация о файле
-        info_col1, info_col2, info_col3 = st.columns(3, gap="small")
-        with info_col1:
-            st.caption("🆔 ID")
-            st.code(file_id[:12], language="text")
-        with info_col2:
-            st.caption("📅 Загружен")
-            st.write(f"`{created_at}`")
-        with info_col3:
-            st.caption("📦 Размер")
-            st.write(f"`{size_formatted}`")
+        # --- Строка с информацией ---
+        col_id, col_date, col_size, col_module, col_class = st.columns(5, gap="small")
 
-        # Прогресс по модулям
-        st.markdown("##### 🔄 Прогресс обработки")
+        with col_id:
+            st.markdown("**<span style='font-size:1.0rem'>ID</span>**", unsafe_allow_html=True)
+            st.code(file_id[:10], language="text")
 
-        completed_modules = set(file.get("completed_modules", []))
-        current_module = file.get("current_module", "")
+        with col_date:
+            st.markdown("**<span style='font-size:1.0rem'>Загружен</span>**", unsafe_allow_html=True)
+            st.write(created_at)
 
-        def get_module_status(module_name: str) -> str:
-            if status == "failed":
-                return "failed"
-            if module_name in completed_modules:
-                return "completed"
-            if module_name == current_module:
-                return "processing"
-            return "pending"
+        with col_size:
+            st.markdown("**<span style='font-size:1.0rem'>Размер</span>**", unsafe_allow_html=True)
+            st.write(size_formatted)
 
-        module_cols = st.columns(len(MODULES_ORDER), gap="small")
-        for i, module_name in enumerate(MODULES_ORDER):
-            mod_status = get_module_status(module_name)
-            with module_cols[i]:
-                render_module_badge_safe(
-                    module=module_name, status=mod_status,
-                    container=module_cols[i], size="small", show_tooltip=True
-                )
+        with col_module:
+            st.markdown("**<span style='font-size:1.0rem'>Сейчас</span>**", unsafe_allow_html=True)
+            st.write(current_module if current_module else "—")
 
-        if status == "processing" and current_module:
-            st.caption(f"⏳ Сейчас: {current_module}")
-        elif status == "completed":
-            st.caption("✅ Все этапы завершены")
-        elif status == "failed":
-            st.caption("❌ Ошибка обработки — файл будет обработан повторно")
+        with col_class:
+            st.markdown("**<span style='font-size:1.0rem'>Классификация</span>**", unsafe_allow_html=True)
+            st.write(classification_str)
 
         st.divider()
 
-        st.markdown("##### 📋 Классификация")
-        from ui.components.classification_badge import render_classification_info
-        render_classification_info(file, container=st)
-
-        st.divider()
-
-        st.markdown("##### ⚙️ Действия")
+        # --- Кнопки действий ---
+        st.markdown("###### ⚙️ Действия")
 
         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4, gap="small")
 
+        # 🔹 УНИКАЛЬНЫЕ КЛЮЧИ
+        key_orig = f"dl_orig_{file_id}"
+        key_prep = f"dl_prep_{file_id}"
+        key_edit = f"edit_{file_id}"
+        key_export = f"export_{file_id}"
+
+        # Проверка существования файла
+        file_path = get_safe_file_path(file_id, filename, BASE_FILES_DIR)
+        file_exists = file_path is not None and file_path.exists() if file_path else False
+
         # Кнопка 1: Скачать оригинал
         with btn_col1:
-            if file_service and file_exists:
+            orig_disabled = not (file_service and file_exists)
+            if not orig_disabled:
                 original_path = file_service.get_download_path(file_id, "original")
-                if original_path and original_path.exists():
-                    with open(original_path, "rb") as f:
-                        st.download_button(
-                            label="📥 Оригинал", data=f.read(), file_name=filename,
-                            mime="application/octet-stream", key=f"dl_orig_{idx}",
-                            use_container_width=True, help="Скачать исходный файл"
-                        )
-                else:
-                    st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True)
+                orig_disabled = not (original_path and original_path.exists())
+
+            if orig_disabled:
+                st.button("📥 Оригинал", key=key_orig, disabled=True, use_container_width=True)
             else:
-                disabled_help = "Файл не найден на диске" if not file_exists else "FileService не доступен"
-                st.button("📥 Оригинал", key=f"dl_orig_{idx}", disabled=True, use_container_width=True, help=disabled_help)
+                with open(original_path, "rb") as f:
+                    st.download_button(
+                        label="📥 Оригинал", data=f.read(), file_name=filename,
+                        mime="application/octet-stream", key=key_orig,
+                        use_container_width=True
+                    )
 
         # Кнопка 2: Скачать результат предобработки
         with btn_col2:
-            preprocess_status = get_module_status("preprocess")
-            if preprocess_status == "completed" and file_service and file_exists:
-                preprocessed_path = file_service.get_download_path(file_id, "preprocessed")
-                if preprocessed_path and preprocessed_path.exists():
-                    with open(preprocessed_path, "rb") as f:
-                        st.download_button(
-                            label="📥 Результат", data=f.read(),
-                            file_name=f"{filename}_processed.png", mime="image/png",
-                            key=f"dl_prep_{idx}", use_container_width=True,
-                            help="Скачать обработанный файл"
-                        )
-                else:
-                    st.button("📥 Результат", key=f"dl_prep_{idx}", disabled=True, use_container_width=True)
+            prep_disabled = not (file_service and file_exists)
+            if not prep_disabled:
+                prep_path = file_service.get_download_path(file_id, "preprocessed")
+                prep_disabled = not (prep_path and prep_path.exists())
+
+            if prep_disabled:
+                st.button("📥 Результат", key=key_prep, disabled=True, use_container_width=True)
             else:
-                btn_help = {
-                    "pending": "Ожидает обработки",
-                    "processing": "Обработка в процессе...",
-                    "failed": "Ошибка обработки",
-                }.get(preprocess_status, "Недоступно")
-                if not file_exists:
-                    btn_help = "Файл не найден на диске"
-                st.button("📥 Результат", key=f"dl_prep_{idx}", disabled=True, use_container_width=True, help=btn_help)
+                with open(prep_path, "rb") as f:
+                    st.download_button(
+                        label="📥 Результат", data=f.read(),
+                        file_name=f"{filename}_processed.png", mime="image/png",
+                        key=key_prep, use_container_width=True
+                    )
 
         # Кнопка 3: Редактировать
         with btn_col3:
-            if on_edit:
-                if st.button("✏️ Править", key=f"edit_{idx}", use_container_width=True, help="Редактировать файл"):
-                    on_edit(file_id)
-            else:
-                st.button("✏️ Править", key=f"edit_{idx}", disabled=True, use_container_width=True)
+            edit_clicked = st.button(
+                "✏️ Править",
+                key=key_edit,
+                disabled=(on_edit is None),
+                use_container_width=True
+            )
+            if edit_clicked and on_edit:
+                on_edit(file_id)
 
         # Кнопка 4: Экспорт в 1С
         with btn_col4:
-            if on_export:
-                all_completed = all(get_module_status(m) == "completed" for m in ["preprocess", "ocr", "llm"])
-                export_disabled = not all_completed or status not in ("completed", "exported") or not file_exists
-
-                export_label = "📤 Экспорт"
-                if status == "exported":
-                    export_label = "✅ Экспортировано"
-
-                export_help = "Экспортировать в 1С"
-                if not file_exists:
-                    export_help = "Файл не найден на диске"
-                elif not all_completed:
-                    export_help = "Завершите все этапы обработки"
-
-                if st.button(export_label, key=f"export_{idx}", use_container_width=True,
-                            disabled=export_disabled, help=export_help):
-                    on_export(file_id)
-            else:
-                st.button("📤 Экспорт", key=f"export_{idx}", disabled=True, use_container_width=True)
-
-        # 🔹 Предупреждение, если файл не найден на диске (но показываем в списке как активный)
-        if not file_exists and status in ("uploaded", "processing"):
-            st.warning(
-                f"⚠️ Файл `{filename}` временно недоступен на диске.\n"
-                f"Возможно, он обрабатывается другим процессом."
+            export_disabled = status not in ("completed", "exported") or not file_exists
+            export_clicked = st.button(
+                "✅ Экспортировано" if status == "exported" else "📤 Экспорт",
+                key=key_export,
+                disabled=export_disabled or (on_export is None),
+                use_container_width=True
             )
-        elif not file_exists and status not in ("uploaded", "processing"):
-            st.error(
-                f"❌ Файл `{filename}` не найден на диске.\n"
-                f"Возможные причины: файл удалён вручную, ошибка монтирования томов."
-            )
-            with st.expander("🔧 Технические детали", expanded=False):
-                st.json({
-                    "file_id": file_id,
-                    "status": status,
-                    "expected_path": str(get_safe_file_path(file_id, filename, BASE_FILES_DIR)),
-                    "metadata": file.get("metadata", {})
-                })
+            if export_clicked and on_export and not export_disabled:
+                on_export(file_id)
 
 
 def _default_navigate_to_detail(file_id: str, session_state: Any) -> None:

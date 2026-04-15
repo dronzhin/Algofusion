@@ -12,9 +12,6 @@ from PIL import Image
 from shared.utils.logger import setup_logger
 from shared.models.file import FileJob
 from workers.OCR.src.config import OCRProcessingConfig
-from workers.OCR.src.ocr.tesseract import TesseractEngine
-from workers.OCR.src.ocr.easyocr import EasyOCREngine
-from workers.OCR.src.ocr.surya import SuryaEngine
 
 logger = setup_logger("workers.ocr.services.ocr_processor")
 

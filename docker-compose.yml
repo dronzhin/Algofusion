@@ -188,11 +188,14 @@ services:
       resources:
         limits:
           cpus: "${OCR_CPU_LIMIT:-4}"
-          memory: "${OCR_MEMORY_LIMIT:-16G}"  # 🔹 Раскомментировано + увеличено для Surya
+          memory: "${OCR_MEMORY_LIMIT:-16G}"
         reservations:
           cpus: "1"
-          memory: "12G"                       # 🔹 Раскомментировано
-
+          memory: "12G"
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
   # --------------------------------------------------------------------------
   # 🆕 OLLAMA - LLM inference server (GPU/CPU авто-детект)
   # --------------------------------------------------------------------------
